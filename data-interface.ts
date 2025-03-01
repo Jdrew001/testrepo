@@ -1,93 +1,91 @@
 /**
- * Configuration for how data is transformed and indexed.
+ * Configuration for an entity type.
  */
-export interface IndexConfig {
-    /** Which fields to index. If undefined, all fields are indexed. */
-    fieldsToIndex?: string[];
-    
+export interface EntityTypeConfig {
+    /** The property name used as the entity ID, e.g. "aeId" or "id". */
+    entityIdProperty?: string;
+  
     /**
-     * Whether to index arrays by an "id"-like property. If false,
-     * the service won't create map entries keyed by item.id.
+     * Function that determines if an array of items belongs to this entity type.
+     * If it returns `true`, it’s considered an "entity array."
      */
-    indexArraysById?: boolean;
-    
-    /** Chunk size if you want to process large arrays in batches. */
-    chunkSize?: number;
-    
-    /** If true, skip creating __all__ arrays to save time/memory. */
-    skipAllCollections?: boolean;
-    
-    /** If true, use `Object.create(null)` for faster object creation. */
-    useNullPrototype?: boolean;
-    
-    /** If true, create aggregated "__all__" arrays for each field or root. */
-    createPrecomputedCollections?: boolean;
-    
-    /** Only precompute large collections if item count exceeds this number. */
-    precomputeThreshold?: number;
-    
-    /** If true, logs performance metrics (transform time, indexing time, etc.) to console. */
-    logPerformance?: boolean;
-
+    detector?: (data: any[]) => boolean;
+  
     /**
-   * If true, logs the actual data each time a performance metric is printed.
-   * Warning: logging very large data can cause console slowdown.
-   */
-    printDataInLogs?: boolean;
+     * Function that extracts an ID from a single entity object, e.g. `(entity) => entity.aeId`.
+     * If omitted, the service’s heuristics try to detect an ID automatically.
+     */
+    idExtractor?: (entity: any) => any;
   }
   
   /**
-   * Defines the public API for the data/index service, which:
-   *  - transforms raw data using ReferenceAdapterService
-   *  - creates O(1) lookup structures
-   *  - allows appending additional data
+   * Defines the public API for the reference/adapter service,
+   * which handles field name mappings and ID detection heuristics.
    */
-  export interface IDataProcessingService {
+  export interface IReferenceAdapterService {
     /**
-     * Overwrite or extend the current indexing configuration.
+     * Register a single rootId-to-fieldName mapping.
+     * Example: map "entity" -> "aeGrid".
      */
-    setConfig(config: Partial<IndexConfig>): void;
+    registerFieldMapping(rootId: string, fieldName: string): void;
   
     /**
-     * Transform the raw data according to the adapter mappings and entity detection
-     * (e.g., rename root keys, attach parentId to nested objects, etc.).
-     * 
-     * For flat arrays with no nested objects, this will simply pass them through;
-     * for nested arrays, the service will try to identify them as "entity arrays."
+     * Register multiple field mappings at once.
+     * Example: { entity: "aeGrid", test: "testItem" }.
      */
-    transformData(data: any): any;
+    registerFieldMappings(mappings: Record<string, string>): void;
   
     /**
-     * Create in-memory indexes (Maps) for fast O(1) lookups.
-     * The data passed to `indexData` should already be transformed
-     * by `transformData(...)`.
+     * Get the transformed field name for a given rootId.
+     * If no mapping is defined, returns the original rootId.
      */
-    indexData(data: any): Promise<void>;
+    getFieldName(rootId: string): string;
   
     /**
-     * Append new data to the existing index, without re-processing everything.
-     *  1. Transform the data
-     *  2. Merge it into the in-memory index
-     *  3. Optionally update precomputed collections
+     * Clear all registered rootId/fieldName mappings.
      */
-    appendData(data: any): Promise<any>;
+    clearMappings(): void;
   
     /**
-     * Lookup data with O(1) time complexity, given:
-     *  - rootId (auto-mapped by adapter)
-     *  - optional field
-     *  - optional ID for that field
-     * 
-     * Returns an array of matching items, or undefined if none found.
+     * Retrieve all current mappings as a simple object.
      */
-    lookup(rootId: string, field?: string, id?: any): any[] | undefined;
+    getAllMappings(): Record<string, string>;
   
     /**
-     * Initialize the service in one shot:
-     *   1. Transform the raw data
-     *   2. Index the data
-     * 
-     * Returns the transformed data so you can inspect or store it if you like.
+     * Store a configuration for detecting and extracting IDs from a particular entity type.
      */
-    initialize(data: any, config?: Partial<IndexConfig>): Promise<any>;
+    configureEntityType(entityType: string, config: EntityTypeConfig): void;
+  
+    /**
+     * Store multiple entity type configurations at once.
+     */
+    configureEntityTypes(configs: Record<string, EntityTypeConfig>): void;
+  
+    /**
+     * Enable or disable auto-detection heuristics for arrays that might be "entity arrays."
+     */
+    setAutoDetection(enabled: boolean): void;
+  
+    /**
+     * **New**: Enable or disable debug logs for detection heuristics.
+     * If `true`, the service logs console messages about single-item skip logic,
+     * ID detection, etc.
+     */
+    setDebugLogs(enabled: boolean): void;
+  
+    /**
+     * Given a rootId and an array of items, return whether it’s likely an entity array,
+     * and if so, what the entity type is (e.g., "entity" or "auto-detected").
+     */
+    detectEntityArray(
+      rootId: string,
+      data: any[]
+    ): { isEntity: boolean; entityType?: string };
+  
+    /**
+     * Extracts or infers the ID from an entity object.
+     * If an entity type is known, it uses the configured logic;
+     * otherwise, it applies fallback heuristics (looking for "id", "aeId", "key", etc.).
+     */
+    extractEntityId(entityType: string | undefined, entity: any): any;
   }

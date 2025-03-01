@@ -55,12 +55,10 @@ export class ReferenceAdapterService {
 
   /**
    * If true, we log debug info about the heuristic detection in the console.
-   * You can toggle this with setDebugLogs(true/false).
    */
   private debugLogs = false;
   
   constructor() {
-    // Optionally set up any default detectors.
     this.initializeDefaultDetectors();
   }
 
@@ -146,7 +144,6 @@ export class ReferenceAdapterService {
 
   /**
    * Toggle debug logs for detection heuristics.
-   * If set to true, console.log statements show how an array is recognized (or not).
    */
   setDebugLogs(enabled: boolean): void {
     this.debugLogs = enabled;
@@ -171,7 +168,7 @@ export class ReferenceAdapterService {
       const config = this.entityConfigs.get(rootId)!;
       if (config.detector && config.detector(data)) {
         if (this.debugLogs) {
-          console.log(`[Adapter] ${rootId}: custom detector returned true => entity array`);
+          console.log(`[Adapter] root=${rootId}: custom detector => entity array`);
         }
         return { isEntity: true, entityType: rootId };
       }
@@ -183,7 +180,7 @@ export class ReferenceAdapterService {
       for (const [entityType, config] of this.entityConfigs.entries()) {
         if (config.detector && config.detector(data)) {
           if (this.debugLogs) {
-            console.log(`[Adapter] auto-detected array for type: ${entityType}`);
+            console.log(`[Adapter] auto-detected array for type=${entityType}`);
           }
           return { isEntity: true, entityType };
         }
@@ -193,7 +190,7 @@ export class ReferenceAdapterService {
       const isGeneric = this.isGenericEntityArray(data, rootId);
       if (isGeneric) {
         if (this.debugLogs) {
-          console.log(`[Adapter] fallback generic detection => entity array for root: ${rootId}`);
+          console.log(`[Adapter] fallback => entity array, root=${rootId}`);
         }
         return { isEntity: true, entityType: 'auto-detected' };
       }
@@ -201,7 +198,7 @@ export class ReferenceAdapterService {
     
     // Otherwise, not an entity array
     if (this.debugLogs) {
-      console.log(`[Adapter] ${rootId}: array is not detected as entity => false`);
+      console.log(`[Adapter] root=${rootId}: array => not an entity array`);
     }
     return { isEntity: false };
   }
@@ -222,7 +219,7 @@ export class ReferenceAdapterService {
       }
     }
     
-    // Fallback to generic detection
+    // Otherwise, fallback to generic detection
     return this.detectEntityId(entity);
   }
 
@@ -234,22 +231,20 @@ export class ReferenceAdapterService {
    * Generic detection logic:
    *   1) Must have more than 1 item (single-item => skip).
    *   2) Must have a recognized unique ID-like property across items.
-   *   3) Must have at least some nested object property (so it's not purely flat).
+   *   3) Must have at least some nested object property.
    */
   private isGenericEntityArray(data: any[], rootId: string): boolean {
     if (this.debugLogs) {
-      console.log(`[Adapter] isGenericEntityArray for root=${rootId}, length=${data.length}`);
+      console.log(`[Adapter] Checking isGenericEntityArray, root=${rootId}, length=${data.length}`);
     }
     
-    // Basic checks
-    if (!data || !Array.isArray(data) || data.length === 0) {
+    if (!data || data.length === 0) {
       return false;
     }
-    
     // 1) skip if only one item
     if (data.length === 1) {
       if (this.debugLogs) {
-        console.log('[Adapter] single-item array => not an entity array');
+        console.log(`[Adapter] root=${rootId} => single-item => not entity`);
       }
       return false;
     }
@@ -258,12 +253,12 @@ export class ReferenceAdapterService {
     const idProperty = this.findCommonIdProperty(data);
     if (!idProperty) {
       if (this.debugLogs) {
-        console.log('[Adapter] no common ID-like property => not an entity array');
+        console.log(`[Adapter] root=${rootId}: no ID-like property => skip`);
       }
       return false;
     }
     if (this.debugLogs) {
-      console.log(`[Adapter] found ID property "${idProperty}" => checking nested structure...`);
+      console.log(`[Adapter] root=${rootId}: found ID=${idProperty}, checking nested...`);
     }
     
     // 3) check for nested objects
@@ -284,35 +279,35 @@ export class ReferenceAdapterService {
     }
     if (!hasNested) {
       if (this.debugLogs) {
-        console.log('[Adapter] no nested objects => not an entity array');
+        console.log(`[Adapter] root=${rootId}: no nested => skip`);
       }
       return false;
     }
     
-    // If we got here, multiple items + ID property + nested => treat as entity array
+    // => multiple items, has unique ID, has nested => entity array
     if (this.debugLogs) {
-      console.log('[Adapter] multiple items + ID property + nested => entity array');
+      console.log(`[Adapter] root=${rootId}: multi items + ID + nested => entity`);
     }
     return true;
   }
 
   /**
-   * Find a common ID-like property across an array (e.g. "id", "code", "key", "uuid", "guid", etc.).
+   * Find a common ID-like property across an array (e.g. "id", "code", "key", "uuid", etc.).
    * Must exist in all sampled items, and be unique among them.
    */
   private findCommonIdProperty(data: any[]): string | undefined {
     if (!data || data.length === 0) return undefined;
     
     const idPatterns = ['id', 'code', 'key', 'num', 'uuid', 'guid', 'ref'];
-    
-    // Sample up to 5 items
     const sampleSize = Math.min(5, data.length);
     const propertyNames = new Set<string>();
     
     for (let i = 0; i < sampleSize; i++) {
       const item = data[i];
       if (item && typeof item === 'object' && !Array.isArray(item)) {
-        Object.keys(item).forEach(key => propertyNames.add(key));
+        for (const k of Object.keys(item)) {
+          propertyNames.add(k);
+        }
       }
     }
     
@@ -322,18 +317,17 @@ export class ReferenceAdapterService {
       const isIdLike = idPatterns.some(p => lower.includes(p));
       if (isIdLike) {
         // check if this prop exists in all sampled items
-        const existsInAll = data.slice(0, sampleSize).every(obj =>
-          obj && typeof obj === 'object' && obj[prop] !== undefined
+        const existsInAll = data.slice(0, sampleSize).every(
+          obj => obj && typeof obj === 'object' && obj[prop] !== undefined
         );
         if (existsInAll) {
           candidateProps.push(prop);
         }
       }
     });
-    
     if (candidateProps.length === 0) return undefined;
     
-    // Now check for uniqueness among up to 20 items
+    // check for uniqueness among up to 20 items
     for (const prop of candidateProps) {
       const seen = new Set();
       let isUnique = true;
@@ -350,7 +344,7 @@ export class ReferenceAdapterService {
       }
     }
     
-    // If none is truly unique, return the first candidate
+    // fallback: if no truly unique property, return the first candidate
     return candidateProps[0];
   }
 
@@ -366,17 +360,16 @@ export class ReferenceAdapterService {
       return this.generateFallbackId(entity);
     }
     
-    // Common ID patterns
     const idPatterns = ['id', 'aeid', 'code', 'key', 'uuid', 'guid', 'Id', 'ID', 'Key', 'Code'];
     
-    // 1) direct match
+    // direct matches
     for (const pat of idPatterns) {
       if (entity[pat] !== undefined) {
         return entity[pat];
       }
     }
     
-    // 2) partial match
+    // partial name matches
     const props = Object.keys(entity);
     for (const prop of props) {
       const lower = prop.toLowerCase();
@@ -389,11 +382,11 @@ export class ReferenceAdapterService {
       }
     }
     
-    // 3) fallback to name or title
+    // fallback to name or title
     if (entity.name !== undefined) return `name-${entity.name}`;
     if (entity.title !== undefined) return `title-${entity.title}`;
     
-    // 4) final fallback: generate a hash-based ID
+    // fallback
     return this.generateFallbackId(entity);
   }
 
@@ -411,9 +404,9 @@ export class ReferenceAdapterService {
   }
 
   /**
-   * You can customize or remove these defaults if needed.
+   * No built-in detectors by default; can add if desired.
    */
   private initializeDefaultDetectors(): void {
-    // No built-in detectors
+    // no default
   }
 }
