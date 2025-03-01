@@ -7,17 +7,17 @@ export interface IndexConfig {
   
     /**
      * Whether to index arrays by an "id"-like property.
-     * If true, we store them under a [item.id] -> item mapping as well.
+     * If true, we also store items keyed by item.id for direct lookups.
      */
     indexArraysById?: boolean;
   
     /** Chunk size if you want to process large arrays in small batches. */
     chunkSize?: number;
   
-    /** If true, skip creating "__all__" arrays for large datasets. */
+    /** If true, skip creating aggregated "__all__" arrays for large datasets. */
     skipAllCollections?: boolean;
   
-    /** If true, uses `Object.create(null)` for object creation for performance. */
+    /** If true, uses Object.create(null) for object creation for performance. */
     useNullPrototype?: boolean;
   
     /** If true, create aggregated "__all__" arrays for each root/field. */
@@ -35,10 +35,18 @@ export interface IndexConfig {
   
   /**
    * Defines the public API for the data/index service, which:
-   *  - Transforms raw data using ReferenceAdapterService
-   *  - Potentially converts "entity arrays" into Map<field, Map<entityId, any[]>>
-   *  - Builds an O(1) lookup structure (IndexMap) if desired
-   *  - Allows incremental appends
+   *  - Transforms raw data using the ReferenceAdapterService.
+   *  - Potentially converts "entity arrays" into a Map-based structure:
+   *      Map<string, Map<any, any[]>>
+   *    (where the outer key is the field name and the inner key is the entity ID).
+   *  - Builds an O(1) lookup structure (IndexMap) if desired.
+   *  - Allows incremental appends.
+   *
+   * The transformData method returns an object where each root is either:
+   *  - A Map<string, Map<any, any[]>> if it is detected as an entity array,
+   *  - Or a plain array/object if it is not.
+   *
+   * The result can be used directly as an index or passed to indexData for further processing.
    */
   export interface IDataProcessingService {
     /**
@@ -48,42 +56,43 @@ export interface IndexConfig {
   
     /**
      * Transform the raw data:
-     *  - rename root keys via adapter
-     *  - if an array is "entity array", store each property in a Map<entityId, any[]> 
-     *    with parentId attached to nested objects
-     *  - otherwise keep plain arrays or objects
-     * 
-     * Returns an object where each root is either:
-     *  - A Map<string, Map<any, any[]>> if it's an entity array
-     *  - A normal array/object if it's not
+     *  - Remap root keys via the adapter.
+     *  - For arrays detected as "entity arrays", convert each property into a Map keyed by the entity ID
+     *    (with parentId attached to nested objects).
+     *  - Otherwise, keep plain arrays or objects.
      *
-     * The result can be used directly as an index, or you can do a separate `indexData` step.
+     * Returns an object where each root is either:
+     *  - A Map<string, Map<any, any[]>> (if it's an entity array),
+     *  - Or a plain array/object (if it's not an entity array).
+     *
+     * This result can be used directly as an index or further processed by indexData.
      */
     transformData(data: any): any;
   
     /**
      * Create an in-memory Map-based index (IndexMap) for O(1) lookups.
-     * Usually you pass the output of `transformData(...)`.
+     * Typically you pass the output of transformData to this method.
      */
     indexData(data: any): Promise<void>;
   
     /**
      * Append new data to the existing index:
-     *  1. Transform the data (which may yield some Map structure)
-     *  2. Merge it into the in-memory index
+     *  1. Transform the new data (which may yield some Map-based structure).
+     *  2. Merge it into the existing in-memory index.
      */
     appendData(data: any): Promise<any>;
   
     /**
-     * O(1) lookup by (rootId, field?, id?). 
-     * If no field is given, it returns all items for that root.
-     * If no id is given, it returns all items for that field.
+     * O(1) lookup by (rootId, field?, id?).
+     *
+     * If no field is provided, it returns all items for that root.
+     * If no id is provided, it returns all items for that field.
      */
     lookup(rootId: string, field?: string, id?: any): any[] | undefined;
   
     /**
-     * Convenience: transform + index in one shot. 
-     * Returns the transformed data (which might be a mix of Maps and plain arrays).
+     * Convenience method: transform raw data and index it in one call.
+     * Returns the transformed data (which might be a mix of Maps and plain arrays/objects).
      */
     initialize(data: any, config?: Partial<IndexConfig>): Promise<any>;
   }
