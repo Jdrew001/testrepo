@@ -46,7 +46,7 @@
 
 I would want it to turn into these maps
 {
-	"aeGrid": {<---- rootId this comes from a property that we want to replace which will be registered in the adapter service
+	"aeGrid": {
 		"legalEntity": [ <---- child
 			{
 				"ae123": [ <---- entity id
@@ -72,7 +72,7 @@ I would want it to turn into these maps
 			}
 		]
 	},
-	"testItem": [< -- these can be put in a map as well but no indexing parentIds needed
+	"testItem": [
 		{
 			"id": 123,
 			"testing": "testing"
@@ -90,7 +90,33 @@ I would want it to turn into these maps
 				}
 			]
 		}
-	]
+	],
+	caSubUnit: [
+        {
+            id: 12, value: "some value", code: null, parentUnitId: 3, showRed: false, sltOwner: {code: "RED123", value: "some name", score: null, showRed: null}, value: "some string"
+        }
+    ],
+    geography: [
+        {
+            childrent: [],
+            countryRegionId: null,
+            data: 1,
+            disabled: false,
+            label: "apac",
+            levelInd: "R"
+        }
+    ],
+    grcTaxonomy: [
+        children: [],
+        hierarchyIdList: [123,123,123,123,34,345,45],
+        id: 16,
+        key: "-1",
+        label: "somelabel",
+        level: "l1",
+        parentFunction: null,
+        selectable: null,
+        showRed: true
+    ]
 }
 
 I am using angular and typescript.

@@ -2,12 +2,12 @@
  * Configuration for an entity type.
  */
 export interface EntityTypeConfig {
-    /** The property name used as the entity ID, e.g. "aeId" or "id". */
+    /** The property name used as the entity ID (e.g. "aeId" or "id"). */
     entityIdProperty?: string;
   
     /**
      * Function that determines if an array of items belongs to this entity type.
-     * If it returns `true`, it’s considered an "entity array."
+     * If it returns `true`, it’s treated as an "entity array."
      */
     detector?: (data: any[]) => boolean;
   
@@ -31,7 +31,7 @@ export interface EntityTypeConfig {
   
     /**
      * Register multiple field mappings at once.
-     * Example: { entity: "aeGrid", test: "testItem" }.
+     * Example: { "entity": "aeGrid", "test": "testItem" }.
      */
     registerFieldMappings(mappings: Record<string, string>): void;
   
@@ -67,15 +67,15 @@ export interface EntityTypeConfig {
     setAutoDetection(enabled: boolean): void;
   
     /**
-     * **New**: Enable or disable debug logs for detection heuristics.
-     * If `true`, the service logs console messages about single-item skip logic,
-     * ID detection, etc.
+     * Enable or disable debug logs for detection heuristics.
+     * If `true`, logs console messages about single-item skip logic,
+     * ID detection, and so on.
      */
     setDebugLogs(enabled: boolean): void;
   
     /**
-     * Given a rootId and an array of items, return whether it’s likely an entity array,
-     * and if so, what the entity type is (e.g., "entity" or "auto-detected").
+     * Decide if an array is an entity array, returning { isEntity, entityType? }.
+     * If true, the DataProcessingService may transform it into a map keyed by entityId.
      */
     detectEntityArray(
       rootId: string,
@@ -83,9 +83,9 @@ export interface EntityTypeConfig {
     ): { isEntity: boolean; entityType?: string };
   
     /**
-     * Extracts or infers the ID from an entity object.
-     * If an entity type is known, it uses the configured logic;
-     * otherwise, it applies fallback heuristics (looking for "id", "aeId", "key", etc.).
+     * Extracts (or infers) the ID from an entity object.
+     * If an entity type is known, it uses that logic; otherwise tries heuristics
+     * like "id", "key", "code", etc.
      */
     extractEntityId(entityType: string | undefined, entity: any): any;
   }
