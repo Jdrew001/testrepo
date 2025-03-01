@@ -3,23 +3,26 @@ import { ReferenceAdapterService } from './reference-adapter.service';
 
 export type IndexMap = Map<string, Map<string, Map<any, any[]>>>;
 
+/**
+ * Configuration for how data is transformed and indexed.
+ */
 export interface IndexConfig {
   /** Which fields to index. If undefined, all fields are indexed. */
   fieldsToIndex?: string[];
 
   /**
    * Whether to index arrays by an "id"-like property.
-   * If true, we store items keyed by item.id as well.
+   * If true, we also store items keyed by item.id for direct lookups.
    */
   indexArraysById?: boolean;
 
-  /** Chunk size if you want to process large arrays in small batches. */
+  /** Chunk size for processing large arrays in batches. */
   chunkSize?: number;
 
   /** If true, skip creating aggregated "__all__" arrays for large datasets. */
   skipAllCollections?: boolean;
 
-  /** If true, uses Object.create(null) for object creation for performance. */
+  /** If true, uses Object.create(null) for object creation. */
   useNullPrototype?: boolean;
 
   /** If true, create aggregated "__all__" arrays for each root/field. */
@@ -28,11 +31,18 @@ export interface IndexConfig {
   /** Only build __all__ if item count exceeds this threshold. */
   precomputeThreshold?: number;
 
-  /** If true, logs performance times (transform, index) to the console. */
+  /** If true, logs performance metrics to the console. */
   logPerformance?: boolean;
 
-  /** If true, also prints the transformed/indexed data. Beware of large logs. */
+  /** If true, also prints transformed/indexed data (may be large). */
   printDataInLogs?: boolean;
+
+  /**
+   * An optional array of root keys that should always be treated as flat.
+   * For example: ['caSubUnit', 'geography', 'grcTaxonomy'].
+   * When a root key is in this array, its data is left untransformed.
+   */
+  flatRoots?: string[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -49,7 +59,8 @@ export class DataProcessingService {
     createPrecomputedCollections: true,
     precomputeThreshold: 10000,
     logPerformance: false,
-    printDataInLogs: false
+    printDataInLogs: false,
+    flatRoots: [] // By default, no roots are forced flat.
   };
 
   constructor(private adapterService: ReferenceAdapterService) {}
@@ -67,33 +78,37 @@ export class DataProcessingService {
     if (!this.config.logPerformance) return;
     const endTime = performance.now();
     const duration = endTime - startTime;
-    console.log(`[Performance] ${operation}: ${duration.toFixed(2)}ms`, {
-      ...extraInfo,
-      duration
-    });
+    console.log(`[Performance] ${operation}: ${duration.toFixed(2)}ms`, { ...extraInfo, duration });
     if (this.config.printDataInLogs && data !== undefined) {
       console.log(`[Performance] ${operation} - data:`, data);
     }
   }
 
   /**
-   * Helper: Determines if an item is "flat" (i.e. all properties are primitives).
+   * Determines if a single item is flat—i.e. all properties are primitives or empty.
+   * In this version, we treat properties named "children" or "childrent" as ignorable.
    */
   private isFlat(item: any): boolean {
     if (item === null) return true;
     if (typeof item !== 'object') return true;
     for (const key in item) {
       if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
+      // Skip known tree keys.
+      if (key === 'children' || key === 'childrent') continue;
       const val = item[key];
+      if (Array.isArray(val)) {
+        if (val.length > 0) return false;
+        else continue;
+      }
       if (val !== null && typeof val === 'object') {
-        return false;
+        if (Object.keys(val).length > 0) return false;
       }
     }
     return true;
   }
 
   /**
-   * Helper: Determines if every item in an array is flat.
+   * Returns true if every item in the array is flat.
    */
   private isFlatArray(arr: any[]): boolean {
     return arr.every(item => this.isFlat(item));
@@ -102,9 +117,9 @@ export class DataProcessingService {
   /**
    * transformData:
    * - Uses the adapter to decide if a root is an entity array.
-   * - If yes and if the array is not flat, creates a Map<field, Map<entityId, any[]>>
-   *   structure with parentId attached to nested objects.
-   * - If not (i.e. the array is flat), returns the root as-is.
+   * - If yes and if the array is not forced to be flat (via config.flatRoots or isFlatArray),
+   *   converts it into a Map<field, Map<entityId, any[]>> with parentId attached.
+   * - Otherwise, returns the root as-is.
    */
   transformData(data: any): any {
     const startTime = performance.now();
@@ -115,6 +130,12 @@ export class DataProcessingService {
       const rootValue = data[rootId];
       const mappedRootId = this.adapterService.getFieldName(rootId);
 
+      // If this root is configured as flat, leave it unchanged.
+      if (this.config.flatRoots && this.config.flatRoots.includes(mappedRootId)) {
+        result[mappedRootId] = rootValue;
+        continue;
+      }
+
       let isEntity = false;
       let entityType: string | undefined;
       if (Array.isArray(rootValue)) {
@@ -123,7 +144,8 @@ export class DataProcessingService {
         entityType = detection.entityType;
       }
 
-      // If it's an array and detected as entity and NOT flat, then transform to a Map
+      // If it's detected as an entity array AND it is not flat,
+      // then transform it to a Map structure.
       if (isEntity && Array.isArray(rootValue) && !this.isFlatArray(rootValue)) {
         const rootMap = new Map<string, Map<any, any[]>>();
         for (const entity of rootValue) {
@@ -131,10 +153,8 @@ export class DataProcessingService {
           if (!entityId) continue;
           for (const prop in entity) {
             if (!Object.prototype.hasOwnProperty.call(entity, prop)) continue;
-            // Respect fieldsToIndex if set
             if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(prop)) continue;
             const val = entity[prop];
-
             if (!rootMap.has(prop)) {
               rootMap.set(prop, new Map<any, any[]>());
             }
@@ -156,7 +176,7 @@ export class DataProcessingService {
         }
         result[mappedRootId] = rootMap;
       } else {
-        // For flat arrays or non-arrays, store as-is.
+        // Otherwise, leave the data as-is (flat array or non-array).
         result[mappedRootId] = rootValue;
       }
     }
@@ -239,7 +259,6 @@ export class DataProcessingService {
     this.indexedData.set(rootKey, new Map<string, Map<any, any[]>>());
     const rootMap = this.indexedData.get(rootKey)!;
 
-    // If rootVal is a Map (entity array structure)
     if (rootVal instanceof Map) {
       for (const [field, entityMap] of rootVal.entries()) {
         this.addFieldForRoot(rootKey, field);
@@ -266,9 +285,7 @@ export class DataProcessingService {
           }
         }
       }
-    }
-    // If rootVal is an array (flat array), store it under "__default__"
-    else if (Array.isArray(rootVal)) {
+    } else if (Array.isArray(rootVal)) {
       rootMap.set('__default__', new Map<any, any[]>());
       const defMap = rootMap.get('__default__')!;
       defMap.set('__all__', rootVal);
@@ -282,9 +299,7 @@ export class DataProcessingService {
           }
         }
       }
-    }
-    // If rootVal is an object, store it as a single object.
-    else if (rootVal && typeof rootVal === 'object') {
+    } else if (rootVal && typeof rootVal === 'object') {
       rootMap.set('__default__', new Map<any, any[]>());
       rootMap.get('__default__')!.set('__single__', [rootVal]);
     } else {

@@ -31,59 +31,28 @@ export interface IndexConfig {
   
     /** If true, also prints transformed/indexed data (may be large). */
     printDataInLogs?: boolean;
+  
+    /**
+     * An optional array of root keys that should be treated as flat.
+     * When a root key is included here, its data is left untransformed.
+     */
+    flatRoots?: string[];
   }
   
   /**
-   * Defines the public API for the data/index service, which:
-   *  - Transforms raw data using ReferenceAdapterService.
-   *  - For "entity arrays," converts each property into a Map<entityId, any[]> 
-   *    (with parentId attached).
-   *  - For flat arrays or objects, stores the data as-is.
-   *  - Builds an in-memory index for O(1) lookups.
-   *  - Allows incremental appends.
+   * Public API for the DataProcessingService.
+   * - transformData: converts raw data into either a Map-based structure (for nested entity arrays)
+   *   or returns the original plain array/object (for flat arrays).
+   * - indexData: builds an in-memory nested Map index (IndexMap) for O(1) lookups.
+   * - lookup: performs O(1) retrieval by root, field, and optionally entityId.
+   * - appendData: merges new data into the existing index.
+   * - initialize: convenience method to transform and index data in one call.
    */
   export interface IDataProcessingService {
-    /**
-     * Update or extend the current configuration.
-     */
     setConfig(config: Partial<IndexConfig>): void;
-  
-    /**
-     * Transform raw data:
-     *  - Remaps root keys via the adapter.
-     *  - If an array is detected as an "entity array" (and is non-flat),
-     *    converts it into a Map<field, Map<entityId, any[]>> with parentId attached.
-     *  - Otherwise, leaves the data as-is.
-     *
-     * Returns an object where each root is either:
-     *  - A Map<string, Map<any, any[]>> if it's an entity array, or
-     *  - A plain array/object if it's not.
-     */
     transformData(data: any): any;
-  
-    /**
-     * Build an in-memory index (IndexMap) for O(1) lookups.
-     * Typically, you pass the output of transformData to this method.
-     */
     indexData(data: any): Promise<void>;
-  
-    /**
-     * Append new data to the existing index:
-     *  1. Transform the new data.
-     *  2. Merge it into the existing index.
-     */
     appendData(data: any): Promise<any>;
-  
-    /**
-     * O(1) lookup by (rootId, field?, id?).
-     * If no field is provided, returns all items for that root.
-     * If no id is provided, returns all items for that field.
-     */
     lookup(rootId: string, field?: string, id?: any): any[] | undefined;
-  
-    /**
-     * Convenience method to transform and index data in one call.
-     * Returns the transformed data (which may be a mix of Maps and plain arrays/objects).
-     */
     initialize(data: any, config?: Partial<IndexConfig>): Promise<any>;
   }

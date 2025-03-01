@@ -22,13 +22,12 @@ export interface EntityTypeConfig {
   }
   
   /**
-   * Defines the public API for the ReferenceAdapterService.
-   *
+   * Public API for the ReferenceAdapterService.
    * This service:
    *  - Remaps root IDs via user-defined mappings.
    *  - Dynamically detects if an array is an "entity array" by scanning for an ID-like property.
-   *    (Single-item arrays are considered entity arrays if they have a valid ID.)
-   *  - Extracts the entity ID.
+   *    Single-item arrays are considered entity arrays if they have a recognized ID.
+   *  - Extracts the entity ID using dynamic heuristics if not explicitly configured.
    */
   export interface IReferenceAdapterService {
     registerFieldMapping(rootId: string, fieldName: string): void;
