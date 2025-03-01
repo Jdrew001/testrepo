@@ -9,7 +9,7 @@ export type AdapterMapping = Map<string, string>;
  * Interface for dynamic entity configuration
  */
 export interface EntityTypeConfig {
-  /** Property name used as entity ID */
+  /** Property name used as entity ID (e.g., 'aeId' or 'id') */
   entityIdProperty?: string;
   
   /** Function to identify entity arrays of this type */
@@ -185,9 +185,8 @@ export class ReferenceAdapterService {
   }
   
   /**
-   * Detect if an array is likely an entity array using heuristics
-   * @param data The array to check
-   * @returns True if the array appears to be an entity array
+   * Detect if an array is likely an entity array using heuristics.
+   * UPDATE: we only treat it as an entity array if it has nested objects (not flat).
    */
   private isGenericEntityArray(data: any[]): boolean {
     if (!data || !Array.isArray(data) || data.length === 0) {
@@ -196,32 +195,53 @@ export class ReferenceAdapterService {
     
     const firstItem = data[0];
     
-    // If not an object, not an entity array
+    // If not an object or it's itself an array, it's not an entity array
     if (!firstItem || typeof firstItem !== 'object' || Array.isArray(firstItem)) {
       return false;
     }
+
+    // 1) Check if at least one item has nested object properties (meaning it's truly hierarchical).
+    let hasNested = false;
+    for (const item of data) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      // Check properties
+      for (const prop in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, prop)) continue;
+        const val = item[prop];
+        // If we find a nested object/array, break
+        if (val && typeof val === 'object') {
+          hasNested = true;
+          break;
+        }
+      }
+      if (hasNested) break;
+    }
     
-    // 1. Check if items have a common ID-like property
+    // If no nested structure, skip entity array logic
+    if (!hasNested) {
+      return false;
+    }
+    
+    // 2) If there's a property that looks like an ID, we treat this as an entity array
     const idProperty = this.findCommonIdProperty(data);
     if (idProperty) {
-      // If there's a property that looks like an ID, we treat this as an entity array
       return true;
     }
     
-    // 2. Alternatively, check for consistent structure across items
+    // 3) Otherwise, check for consistent structure across items
     const sampleProperties = Object.keys(firstItem);
     if (sampleProperties.length > 0) {
-      const consistentStructure = data
-        .slice(1, Math.min(10, data.length))
-        .every(item => {
-          if (!item || typeof item !== 'object') return false;
-          const itemProps = Object.keys(item);
-          // At least 75% of properties should match
-          const matchingProps = itemProps.filter(p => sampleProperties.includes(p));
-          return matchingProps.length >= sampleProperties.length * 0.75;
-        });
+      const consistent = data.slice(1, Math.min(10, data.length)).every(item => {
+        if (!item || typeof item !== 'object') return false;
+        const itemProps = Object.keys(item);
+        // Require at least 75% property overlap as a heuristic
+        const matching = itemProps.filter(p => sampleProperties.includes(p));
+        return matching.length >= sampleProperties.length * 0.75;
+      });
       
-      return consistentStructure;
+      return consistent;
     }
     
     return false;
@@ -258,15 +278,16 @@ export class ReferenceAdapterService {
       const propLower = prop.toLowerCase();
       const isIdLike = idPatterns.some(pattern => propLower.includes(pattern));
       if (isIdLike) {
-        const existsInAll = data.slice(0, sampleSize).every(item => 
-          item && typeof item === 'object' && item[prop] !== undefined);
+        const existsInAll = data.slice(0, sampleSize).every(
+          item => item && typeof item === 'object' && item[prop] !== undefined
+        );
         if (existsInAll) {
           candidateProps.push(prop);
         }
       }
     });
     
-    // Check for uniqueness
+    // Check for uniqueness in potential ID-like properties
     if (candidateProps.length > 0) {
       for (const prop of candidateProps) {
         const values = new Set();
@@ -302,36 +323,34 @@ export class ReferenceAdapterService {
       return this.generateFallbackId(entity);
     }
     
-    // Common ID patterns in priority order
-    const idPatterns = [
-      'id', 'key', 'code', 'uuid', 'guid',
-      'Id', 'ID', 'Key', 'Code'
-    ];
+    // Common ID patterns
+    const idPatterns = ['id', 'key', 'code', 'uuid', 'guid', 'Id', 'ID', 'Key', 'Code'];
     
-    // First pass: check direct properties
+    // Check direct matches
     for (const pattern of idPatterns) {
       if (entity[pattern] !== undefined) {
         return entity[pattern];
       }
     }
     
-    // Next pass: see if property name partially matches
+    // Check partial matches
     const props = Object.keys(entity);
     for (const prop of props) {
       const propLower = prop.toLowerCase();
-      if (idPatterns.some(pattern => 
-            propLower === pattern.toLowerCase() || 
+      if (idPatterns.some(pattern =>
+            propLower === pattern.toLowerCase() ||
             propLower.endsWith(pattern.toLowerCase()) ||
-            propLower.startsWith(pattern.toLowerCase()))) {
+            propLower.startsWith(pattern.toLowerCase())
+         )) {
         return entity[prop];
       }
     }
     
-    // Fallback to name or title if present
+    // Fallback to name or title
     if (entity.name !== undefined) return `name-${entity.name}`;
     if (entity.title !== undefined) return `title-${entity.title}`;
     
-    // Last resort: generate ID from hash
+    // Generate fallback ID
     return this.generateFallbackId(entity);
   }
   
@@ -351,9 +370,9 @@ export class ReferenceAdapterService {
   }
   
   /**
-   * Initialize default entity detectors and extractors
+   * Initialize default entity detectors and extractors (empty by default)
    */
   private initializeDefaultDetectors(): void {
-    // No built-in detectors by default
+    // No built-in detectors out of the box
   }
 }

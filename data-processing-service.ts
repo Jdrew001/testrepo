@@ -10,14 +10,14 @@ export type IndexMap = Map<string, Map<string, Map<any, any[]>>>;
  * Extended configuration interface to match what the code actually uses
  */
 export interface IndexConfig {
-  fieldsToIndex?: string[];
-  indexArraysById?: boolean;
-  chunkSize?: number;
-  skipAllCollections?: boolean;
-  useNullPrototype?: boolean;
-  createPrecomputedCollections?: boolean;
-  precomputeThreshold?: number;
-  logPerformance?: boolean;
+  fieldsToIndex?: string[];            // Which fields to index (undefined = all)
+  indexArraysById?: boolean;           // Index arrays by item.id?
+  chunkSize?: number;                  // For potential batch processing
+  skipAllCollections?: boolean;        // Skip creating "__all__" arrays
+  useNullPrototype?: boolean;          // Use Object.create(null)
+  createPrecomputedCollections?: boolean;  
+  precomputeThreshold?: number;        // Only precompute if item count > this
+  logPerformance?: boolean;            // Logs transform/index times to console
 }
 
 @Injectable({
@@ -113,7 +113,8 @@ export class DataProcessingService {
           // Extract or detect entity ID
           const entityId = this.adapterService.extractEntityId(entityType, entity);
           if (!entityId) {
-            continue; // skip if we can't find an ID
+            // skip if we can't find an ID
+            continue;
           }
           
           // For each property in the entity object, we place it in mappedObj[prop][entityId]
@@ -133,7 +134,7 @@ export class DataProcessingService {
             const container = mappedObj[prop];
             
             // If it's an object (and not an array), we clone and add parentId
-            if (this.isObject(value) && !Array.isArray(value)) {
+            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
               const cloned = this.cloneWithParentId(value, [entityId]);
               container[entityId] = container[entityId] || [];
               container[entityId].push(cloned);
@@ -173,13 +174,6 @@ export class DataProcessingService {
   }
 
   /**
-   * Check if a value is a non-null object (not an array).
-   */
-  private isObject(value: any): boolean {
-    return value !== null && typeof value === 'object' && !Array.isArray(value);
-  }
-
-  /**
    * Clone an object and add parentId without using spread (performance reasons).
    */
   private cloneWithParentId(obj: any, parentIds: any[]): any {
@@ -203,7 +197,7 @@ export class DataProcessingService {
     
     for (let i = 0; i < len; i++) {
       const item = arr[i];
-      if (this.isObject(item)) {
+      if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
         const cloned = this.cloneWithParentId(item, parentIds);
         // Recursively fix children if present
         if (Array.isArray(item.children)) {
@@ -211,7 +205,7 @@ export class DataProcessingService {
         }
         result[i] = cloned;
       } else {
-        // If it's primitive, wrap it
+        // If it's a primitive or array, just wrap it
         result[i] = {
           value: item,
           parentId: parentIds
@@ -246,10 +240,10 @@ export class DataProcessingService {
     // Optionally create big __all__ arrays for each root (if configured).
     if (this.config.createPrecomputedCollections) {
       const precomputeStart = performance.now();
-      for (const rootId of Array.from(this.indexedData.keys())) {
-        const rootMap = this.indexedData.get(rootId)!;
+      for (const rootKey of Array.from(this.indexedData.keys())) {
+        const rootMap = this.indexedData.get(rootKey)!;
         if (this.shouldPrecomputeCollections(rootMap)) {
-          this.createRootAllCollection(rootId);
+          this.createRootAllCollection(rootKey);
         }
       }
       this.logPerformanceMetric('Precomputation phase', precomputeStart);
@@ -269,7 +263,7 @@ export class DataProcessingService {
     const rootMap = this.indexedData.get(rootId)!;
     
     // If it's an object that has { field -> { entityId -> arrayOfItems } }
-    if (this.isObject(rootVal)) {
+    if (rootVal !== null && typeof rootVal === 'object' && !Array.isArray(rootVal)) {
       for (const field in rootVal) {
         if (!Object.prototype.hasOwnProperty.call(rootVal, field)) continue;
         
@@ -281,7 +275,7 @@ export class DataProcessingService {
         const fieldValue = rootVal[field];
         
         // If fieldValue is an object of { entityId -> arrayOfItems }
-        if (this.isObject(fieldValue)) {
+        if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
           const entityIds = Object.keys(fieldValue);
           let totalItems = 0;
           
@@ -355,6 +349,44 @@ export class DataProcessingService {
   }
 
   /**
+   * Append new data to the existing index:
+   *  1. Transform the data
+   *  2. Merge it into the in-memory index
+   *  3. Optionally update precomputed collections
+   */
+  async appendData(data: any): Promise<any> {
+    // 1) Transform new data
+    const transformedData = this.transformData(data);
+
+    // 2) Merge into existing index or create new root
+    for (const rootKey in transformedData) {
+      if (!Object.prototype.hasOwnProperty.call(transformedData, rootKey)) continue;
+
+      const val = transformedData[rootKey];
+      if (!this.indexedData.has(rootKey)) {
+        // brand-new root
+        this.indexSingleRoot(rootKey, val);
+      } else {
+        // existing root: merge
+        this.mergeRoot(rootKey, val);
+      }
+    }
+
+    // 3) Optionally re-create precomputed collections
+    if (this.config.createPrecomputedCollections) {
+      const rootKeys = Object.keys(transformedData);
+      for (const rootKey of rootKeys) {
+        const rootMap = this.indexedData.get(rootKey);
+        if (rootMap && this.shouldPrecomputeCollections(rootMap)) {
+          this.createRootAllCollection(rootKey);
+        }
+      }
+    }
+
+    return transformedData;
+  }
+
+  /**
    * Merge new data into an existing root. 
    * This is used by appendData() so we don’t re-index from scratch.
    */
@@ -363,7 +395,7 @@ export class DataProcessingService {
     if (!rootMap) return; // should not happen if we do existence check
 
     // If the new root is an object with { field -> { entityId -> [items] } }
-    if (this.isObject(newRootVal)) {
+    if (newRootVal !== null && typeof newRootVal === 'object' && !Array.isArray(newRootVal)) {
       for (const field in newRootVal) {
         if (!Object.prototype.hasOwnProperty.call(newRootVal, field)) continue;
         
@@ -371,20 +403,18 @@ export class DataProcessingService {
         this.addFieldForRoot(rootId, field);
 
         if (!rootMap.has(field)) {
-          // If we never had this field, treat it like a brand-new field
           rootMap.set(field, new Map<any, any[]>());
         }
         const fieldMap = rootMap.get(field)!;
         const fieldValue = newRootVal[field];
 
         // If fieldValue is { entityId -> arrayOfItems }
-        if (this.isObject(fieldValue)) {
+        if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
           for (const entityId of Object.keys(fieldValue)) {
             const items = fieldValue[entityId];
             if (!fieldMap.has(entityId)) {
               fieldMap.set(entityId, []);
             }
-            // Append new items
             fieldMap.get(entityId)!.push(...items);
 
             // Update __all__ if it exists
@@ -401,7 +431,7 @@ export class DataProcessingService {
           }
           fieldMap.get('__all__')!.push(...fieldValue);
 
-          // If indexing by ID, add each item
+          // If indexing by ID
           if (this.config.indexArraysById) {
             for (const item of fieldValue) {
               if (item && item.id !== undefined) {
@@ -414,7 +444,6 @@ export class DataProcessingService {
           }
         } else {
           // Single object/primitive
-          // Put it under __single__, append
           if (!fieldMap.has('__single__')) {
             fieldMap.set('__single__', []);
           }
@@ -422,9 +451,8 @@ export class DataProcessingService {
         }
       }
     }
-    // If new rootVal is an array
+    // If newRootVal is an array
     else if (Array.isArray(newRootVal)) {
-      // Expect a "__default__" field
       if (!rootMap.has('__default__')) {
         rootMap.set('__default__', new Map<any, any[]>());
       }
@@ -457,55 +485,6 @@ export class DataProcessingService {
       }
       defaultMap.get('__single__')!.push(newRootVal);
     }
-  }
-
-  /**
-   * Append new data to the existing index:
-   *  1. Transform the new data
-   *  2. For each root, merge or create fresh index
-   *  3. (Optional) update precomputed collections
-   */
-  async appendData(data: any): Promise<any> {
-    // 1) Transform new data
-    const transformedData = this.transformData(data);
-
-    // 2) Merge into existing index or create new root
-    for (const rootKey in transformedData) {
-      if (!Object.prototype.hasOwnProperty.call(transformedData, rootKey)) continue;
-
-      const val = transformedData[rootKey];
-      if (!this.indexedData.has(rootKey)) {
-        // brand-new root
-        this.indexSingleRoot(rootKey, val);
-      } else {
-        // existing root: merge
-        this.mergeRoot(rootKey, val);
-      }
-    }
-
-    // 3) Optionally re-create precomputed collections if that’s important 
-    //    for new data. For large data, you might do this selectively.
-    if (this.config.createPrecomputedCollections) {
-      const rootKeys = Object.keys(transformedData);
-      for (const rootKey of rootKeys) {
-        const rootMap = this.indexedData.get(rootKey);
-        if (rootMap && this.shouldPrecomputeCollections(rootMap)) {
-          this.createRootAllCollection(rootKey);
-        }
-      }
-    }
-
-    return transformedData;
-  }
-
-  /**
-   * Add a field to fieldsByRoot.
-   */
-  private addFieldForRoot(rootId: string, field: string): void {
-    if (!this.fieldsByRoot.has(rootId)) {
-      this.fieldsByRoot.set(rootId, new Set<string>());
-    }
-    this.fieldsByRoot.get(rootId)!.add(field);
   }
 
   /**
@@ -572,6 +551,16 @@ export class DataProcessingService {
   }
 
   /**
+   * Add a field to fieldsByRoot.
+   */
+  private addFieldForRoot(rootId: string, field: string): void {
+    if (!this.fieldsByRoot.has(rootId)) {
+      this.fieldsByRoot.set(rootId, new Set<string>());
+    }
+    this.fieldsByRoot.get(rootId)!.add(field);
+  }
+
+  /**
    * Lookup data in O(1) time from the indexed structure.
    * 
    * @param rootId - the top-level name (will be mapped by adapter)
@@ -633,7 +622,6 @@ export class DataProcessingService {
         }
       }
     }
-    
     return result;
   }
 
@@ -641,7 +629,6 @@ export class DataProcessingService {
    * Convenience method to initialize everything in one go:
    *   1. Transform data
    *   2. Index data
-   * Returns the transformed data.
    */
   async initialize(data: any, config?: Partial<IndexConfig>): Promise<any> {
     if (config) {
