@@ -40,54 +40,6 @@ export class ReferenceAdapterService {
     this.initializeDefaultDetectors();
   }
 
-  constructor() {}
-
-  /**
-   * Register a rootId to field name mapping in the adapter
-   * @param rootId The original root ID to be replaced
-   * @param fieldName The field name to replace it with
-   */
-  registerFieldMapping(rootId: string, fieldName: string): void {
-    this.fieldMappings.set(rootId, fieldName);
-  }
-
-  /**
-   * Register multiple field mappings at once
-   * @param mappings Object containing rootId to fieldName mappings
-   */
-  registerFieldMappings(mappings: Record<string, string>): void {
-    for (const [rootId, fieldName] of Object.entries(mappings)) {
-      this.registerFieldMapping(rootId, fieldName);
-    }
-  }
-
-  /**
-   * Get the transformed field name for a given rootId
-   * @param rootId The original root ID
-   * @returns The mapped field name or the original if no mapping exists
-   */
-  getFieldName(rootId: string): string {
-    return this.fieldMappings.get(rootId) || rootId;
-  }
-
-  /**
-   * Clear all registered field mappings
-   */
-  clearMappings(): void {
-    this.fieldMappings.clear();
-  }
-
-  /**
-   * Get all registered field mappings
-   * @returns Object containing all rootId to fieldName mappings
-   */
-  /**
-   * Initialize default entity detectors and extractors
-   */
-  private initializeDefaultDetectors(): void {
-    // No predefined entity types - everything is auto-detected
-  }
-
   /**
    * Register a rootId to field name mapping in the adapter
    * @param rootId The original root ID to be replaced
@@ -249,50 +201,27 @@ export class ReferenceAdapterService {
       return false;
     }
     
-    // Check if all items have a common structure that suggests entities
-    
     // 1. Check if items have a common ID-like property
     const idProperty = this.findCommonIdProperty(data);
     if (idProperty) {
-      // Additional check: is this array meant for grouping?
-      // If it's just a flat list with IDs, we may not want to treat it as an entity array
-      // for special transformation - this check helps distinguish cases where grouping is needed
-      
-      // Check if there are object-type properties or array properties
-      // that would benefit from the parent-child relationship
-      const hasComplexProperties = Object.keys(firstItem).some(prop => {
-        const value = firstItem[prop];
-        return value !== null && typeof value === 'object';
-      });
-      
-      // If there are complex properties, this is likely an entity array that needs grouping
-      // If all properties are primitives, it might just be a flat list that doesn't need special processing
-      return hasComplexProperties;
+      // If there's a property that looks like an ID, we treat this as an entity array
+      return true;
     }
     
-    // 2. Check if items have consistent properties across the array
-    // This suggests a collection of similar entities
+    // 2. Alternatively, check for consistent structure across items
     const sampleProperties = Object.keys(firstItem);
     if (sampleProperties.length > 0) {
-      // Check if most items have the same properties
-      // This is a heuristic that suggests these are similar entities
-      const consistentStructure = data.slice(1, Math.min(10, data.length)).every(item => {
-        if (!item || typeof item !== 'object') return false;
-        const itemProps = Object.keys(item);
-        // At least 75% of properties should match for structure to be considered consistent
-        const matchingProps = itemProps.filter(p => sampleProperties.includes(p));
-        return matchingProps.length >= sampleProperties.length * 0.75;
-      });
-      
-      // Additional check for complex properties that would benefit from grouping
-      if (consistentStructure) {
-        const hasComplexProperties = sampleProperties.some(prop => {
-          const value = firstItem[prop];
-          return value !== null && typeof value === 'object';
+      const consistentStructure = data
+        .slice(1, Math.min(10, data.length))
+        .every(item => {
+          if (!item || typeof item !== 'object') return false;
+          const itemProps = Object.keys(item);
+          // At least 75% of properties should match
+          const matchingProps = itemProps.filter(p => sampleProperties.includes(p));
+          return matchingProps.length >= sampleProperties.length * 0.75;
         });
-        
-        return hasComplexProperties;
-      }
+      
+      return consistentStructure;
     }
     
     return false;
@@ -327,22 +256,17 @@ export class ReferenceAdapterService {
     
     propertyNames.forEach(prop => {
       const propLower = prop.toLowerCase();
-      
-      // Check if property name contains an ID pattern
       const isIdLike = idPatterns.some(pattern => propLower.includes(pattern));
-      
       if (isIdLike) {
-        // Check if this property exists in all sampled items
         const existsInAll = data.slice(0, sampleSize).every(item => 
           item && typeof item === 'object' && item[prop] !== undefined);
-          
         if (existsInAll) {
           candidateProps.push(prop);
         }
       }
     });
     
-    // If we have candidates, check if values are unique (a good ID property should have unique values)
+    // Check for uniqueness
     if (candidateProps.length > 0) {
       for (const prop of candidateProps) {
         const values = new Set();
@@ -361,8 +285,7 @@ export class ReferenceAdapterService {
           return prop;
         }
       }
-      
-      // If no property has unique values, return the first candidate
+      // If no property is truly unique, return the first candidate
       return candidateProps[0];
     }
     
@@ -381,38 +304,34 @@ export class ReferenceAdapterService {
     
     // Common ID patterns in priority order
     const idPatterns = [
-      // Exact matches
       'id', 'key', 'code', 'uuid', 'guid',
-      // Pattern matches
       'Id', 'ID', 'Key', 'Code'
     ];
     
-    // Check for exact matches first
-    for (const pattern of idPatterns.slice(0, 5)) {
+    // First pass: check direct properties
+    for (const pattern of idPatterns) {
       if (entity[pattern] !== undefined) {
         return entity[pattern];
       }
     }
     
-    // Then check for pattern matches
+    // Next pass: see if property name partially matches
     const props = Object.keys(entity);
     for (const prop of props) {
       const propLower = prop.toLowerCase();
-      
-      // Check for properties ending with ID patterns
       if (idPatterns.some(pattern => 
-        propLower === pattern || 
-        propLower.endsWith(pattern.toLowerCase()) ||
-        propLower.startsWith(pattern.toLowerCase()))) {
+            propLower === pattern.toLowerCase() || 
+            propLower.endsWith(pattern.toLowerCase()) ||
+            propLower.startsWith(pattern.toLowerCase()))) {
         return entity[prop];
       }
     }
     
-    // Last resort: If it has a name or title, use that
+    // Fallback to name or title if present
     if (entity.name !== undefined) return `name-${entity.name}`;
     if (entity.title !== undefined) return `title-${entity.title}`;
     
-    // If all else fails, generate a fallback ID
+    // Last resort: generate ID from hash
     return this.generateFallbackId(entity);
   }
   
@@ -422,7 +341,6 @@ export class ReferenceAdapterService {
    * @returns A generated ID string
    */
   private generateFallbackId(entity: any): string {
-    // Create a hash from the stringified entity
     let hash = 0;
     const str = JSON.stringify(entity);
     for (let i = 0; i < str.length; i++) {
@@ -430,5 +348,12 @@ export class ReferenceAdapterService {
       hash |= 0; // Convert to 32-bit integer
     }
     return `gen-${Math.abs(hash).toString(36)}`;
+  }
+  
+  /**
+   * Initialize default entity detectors and extractors
+   */
+  private initializeDefaultDetectors(): void {
+    // No built-in detectors by default
   }
 }
