@@ -1,20 +1,4 @@
-  /**
-   * Log performance metrics if enabled
-   * @param operation The operation name
-   * @param startTime The start time
-   * @param extraInfo Optional extra info to log
-   */
-  private logPerformanceMetric(operation: string, startTime: number, extraInfo: Record<string, any> = {}): void {
-    if (!this.config.logPerformance) return;
-    
-    const endTime = performance.now();
-    const duration = endTime - startTime;
-    
-    console.log(`[Performance] ${operation}: ${duration.toFixed(2)}ms`, {
-      ...extraInfo,
-      duration
-    });
-  }import { Injectable } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { ReferenceAdapterService } from './reference-adapter.service';
 
 /**
@@ -23,54 +7,69 @@ import { ReferenceAdapterService } from './reference-adapter.service';
 export type IndexMap = Map<string, Map<string, Map<any, any[]>>>;
 
 /**
- * Interface for index configuration options
+ * Extended configuration interface to match what the code actually uses
  */
 export interface IndexConfig {
   /**
-   * Fields to index (limits indexing to specific fields for better performance)
+   * Fields to index (limits indexing to specific fields for better performance).
+   * If undefined, all fields are indexed.
    */
   fieldsToIndex?: string[];
   
   /**
-   * Whether to index arrays by ID (false can improve performance if not needed)
+   * Whether to index arrays by ID (false can improve performance if not needed).
    */
   indexArraysById?: boolean;
   
   /**
-   * Chunk size for processing large arrays (batches work for better performance)
+   * Chunk size for processing large arrays (batches for better performance).
    */
   chunkSize?: number;
   
   /**
-   * Whether to skip creating "__all__" collections for large datasets
+   * Whether to skip creating "__all__" collections for large datasets.
    */
   skipAllCollections?: boolean;
   
   /**
-   * Whether to use Object.create(null) instead of {} for better performance
+   * Whether to use Object.create(null) instead of {} for better performance.
    */
   useNullPrototype?: boolean;
+  
+  /**
+   * Whether to create big precomputed collections of all items in a field.
+   */
+  createPrecomputedCollections?: boolean;
+  
+  /**
+   * Threshold above which we do precomputation (e.g. 10K).
+   */
+  precomputeThreshold?: number;
+  
+  /**
+   * Whether to log performance (if you want console logs).
+   */
+  logPerformance?: boolean;
 }
 
-/**
- * DataProcessingService handles the transformation, indexing, and lookup of data
- * This service uses the ReferenceAdapterService for field name mappings
- */
 @Injectable({
   providedIn: 'root'
 })
 export class DataProcessingService {
   private indexedData: IndexMap = new Map<string, Map<string, Map<any, any[]>>>();
-  
+
+  // Keep track of which "fields" exist under each root for easier creation of __all__.
+  private fieldsByRoot: Map<string, Set<string>> = new Map();
+
   // Default configuration
   private config: IndexConfig = {
-    fieldsToIndex: undefined, // All fields
+    fieldsToIndex: undefined,
     indexArraysById: true,
     chunkSize: 5000,
     skipAllCollections: false,
     useNullPrototype: true,
     createPrecomputedCollections: true,
-    precomputeThreshold: 10000, // Only precompute for collections with > 10K items
+    precomputeThreshold: 10000,
     logPerformance: false
   };
 
@@ -84,717 +83,481 @@ export class DataProcessingService {
   }
 
   /**
-   * Transform the original data structure based on registered mappings from adapter service
-   * Optimized for performance with large datasets
+   * Log performance metrics if enabled
+   */
+  private logPerformanceMetric(
+    operation: string, 
+    startTime: number, 
+    extraInfo: Record<string, any> = {}
+  ): void {
+    if (!this.config.logPerformance) return;
+    
+    const endTime = performance.now();
+    const duration = endTime - startTime;
+    
+    console.log(`[Performance] ${operation}: ${duration.toFixed(2)}ms`, {
+      ...extraInfo,
+      duration
+    });
+  }
+
+  /**
+   * Main transform function: 
+   *  - Renames root keys via AdapterService
+   *  - For "entity arrays," transforms them into a map keyed by ID 
+   *    with children referencing parentId
    */
   transformData(data: any): any {
     const startTime = performance.now();
     
-    // Create result object with null prototype for better performance
+    // Create result object with null prototype if desired
     const result = this.config.useNullPrototype ? Object.create(null) : {};
     
-    // Process each root element
     for (const rootId in data) {
-      if (!Object.prototype.hasOwnProperty.call(data, rootId)) continue;
+      if (!Object.prototype.hasOwnProperty.call(data, rootId)) {
+        continue;
+      }
       
-      // Use adapter service to get the mapped field name
+      // Map the root ID to a new name if registered
       const mappedRootId = this.adapterService.getFieldName(rootId);
       const rootValue = data[rootId];
       
-      // Check if this is an entity array
-      let isEntityArray = false;
-      let entityType: string | undefined;
-      
+      // Detect if rootValue is an "entity array"
+      let { isEntity, entityType } = { isEntity: false, entityType: undefined as string|undefined };
       if (Array.isArray(rootValue)) {
         const detectionStart = performance.now();
         const detection = this.adapterService.detectEntityArray(rootId, rootValue);
-        isEntityArray = detection.isEntity;
+        isEntity = detection.isEntity;
         entityType = detection.entityType;
-        this.logPerformanceMetric(`Entity detection for ${rootId}`, detectionStart, { isEntity: isEntityArray, entityType });
+        this.logPerformanceMetric(
+          `Entity detection for ${rootId}`, 
+          detectionStart, 
+          { isEntity, entityType }
+        );
       }
       
-      // Handle entity arrays - only apply special processing if it's actually an entity array
-      if (isEntityArray && Array.isArray(rootValue)) {
-        // Create transformed structure for entity data
-        result[mappedRootId] = this.config.useNullPrototype ? Object.create(null) : {};
+      // If it is an entity array, we do the special transformation
+      if (isEntity && Array.isArray(rootValue)) {
+        // We'll store an object of fields, each key -> { entityId -> [ array of items ] }
+        const mappedObj = this.config.useNullPrototype ? Object.create(null) : {};
         
-        const entityCount = rootValue.length;
-        
-        // Process all entities
-        for (let i = 0; i < entityCount; i++) {
-          const entity = rootValue[i];
+        for (const entity of rootValue) {
+          // Extract or detect entity ID
           const entityId = this.adapterService.extractEntityId(entityType, entity);
+          if (!entityId) {
+            // If for some reason we can't find an ID, skip
+            continue;
+          }
           
-          // Skip entities without ID (shouldn't happen with fallback generation)
-          if (entityId === undefined) continue;
-          
-          // Process each property of the entity
+          // For each property in the entity object, we place it in mappedObj[prop][entityId]
           for (const prop in entity) {
-            // Get property value
-            const propValue = entity[prop];
+            if (!Object.prototype.hasOwnProperty.call(entity, prop)) continue;
+            const value = entity[prop];
             
-            // Skip if this property is the ID property (check by comparing values)
-            if (propValue === entityId && this.isPrimitiveValue(propValue)) {
+            // If there's a fieldsToIndex filter, skip if not included
+            if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(prop)) {
               continue;
             }
             
-            // Skip fields not in fieldsToIndex if specified
-            if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(prop)) continue;
-            
-            // Initialize the property in the result if needed
-            if (!result[mappedRootId][prop]) {
-              result[mappedRootId][prop] = this.config.useNullPrototype ? Object.create(null) : {};
+            // Initialize the container if not present
+            if (!mappedObj[prop]) {
+              mappedObj[prop] = this.config.useNullPrototype ? Object.create(null) : {};
             }
+            const container = mappedObj[prop];
             
-            // Process the property based on its type
-            if (propValue !== null && typeof propValue === 'object') {
-              if (Array.isArray(propValue)) {
-                // Handle array properties
-                result[mappedRootId][prop][entityId] = this.fastAddParentIds(propValue, [entityId]);
-              } else {
-                // Handle object properties - avoid spread for performance
-                const objWithParentId = this.cloneWithParentId(propValue, [entityId]);
-                result[mappedRootId][prop][entityId] = [objWithParentId];
-              }
-            } else {
-              // Handle primitive properties
-              result[mappedRootId][prop][entityId] = [{ value: propValue, parentId: [entityId] }];
+            // If it's an object (and not an array), we clone and add parentId
+            if (this.isObject(value) && !Array.isArray(value)) {
+              const cloned = this.cloneWithParentId(value, [entityId]);
+              // We store the object in an array for consistency
+              container[entityId] = container[entityId] || [];
+              container[entityId].push(cloned);
+            }
+            // If it's an array, we treat each item similarly
+            else if (Array.isArray(value)) {
+              // For an array, we want each item to have a parentId
+              const transformedArray = this.fastAddParentIds(value, [entityId]);
+              container[entityId] = container[entityId] || [];
+              container[entityId].push(...transformedArray);
+            } 
+            // Otherwise, it's a primitive
+            else {
+              container[entityId] = container[entityId] || [];
+              container[entityId].push({
+                value,
+                parentId: [entityId]
+              });
             }
           }
         }
+        
+        result[mappedRootId] = mappedObj;
       } else {
-        // For regular arrays or other structures, just assign directly
-        // No special transformation for flat data structures
+        // For non-entity arrays or other structures, just pass them through 
+        // but rename the root ID
         result[mappedRootId] = rootValue;
       }
     }
     
-    this.logPerformanceMetric('Transform data', startTime, { 
+    this.logPerformanceMetric('Transform data', startTime, {
       rootCount: Object.keys(result).length,
       originalSize: JSON.stringify(data).length, 
-      transformedSize: JSON.stringify(result).length 
+      transformedSize: JSON.stringify(result).length
     });
-    
-    return result;
-  }
-    
-    return result;
-  }
-  
-  /**
-   * Check if a value is a primitive value
-   * @param value The value to check
-   * @returns True if the value is a primitive
-   */
-  private isPrimitiveValue(value: any): boolean {
-    return value === null || 
-           typeof value === 'undefined' ||
-           typeof value === 'string' ||
-           typeof value === 'number' ||
-           typeof value === 'boolean';
-  }
     
     return result;
   }
 
   /**
-   * Efficiently clone an object and add parentId without using spread operator
-   * This is more performant for large objects
+   * Check if a value is a non-null object (not an array).
+   */
+  private isObject(value: any): boolean {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  /**
+   * Clone an object and add parentId without using spread (performance reasons).
    */
   private cloneWithParentId(obj: any, parentIds: any[]): any {
-    // Use Object.create for performance over spread operator
     const result = this.config.useNullPrototype ? Object.create(null) : {};
-    
-    // Copy all properties
     for (const key in obj) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
         result[key] = obj[key];
       }
     }
-    
     // Add parentId
     result.parentId = parentIds;
-    
     return result;
   }
 
   /**
-   * Fast implementation to add parentIds to all elements in an array
-   * Optimized for performance with large arrays
+   * For each item in an array, add a parentId. If an item has 'children',
+   * also recursively update them. You can tailor this logic further if needed.
    */
   private fastAddParentIds(arr: any[], parentIds: any[]): any[] {
     const len = arr.length;
     const result = new Array(len);
     
-    // Fast for-loop instead of map
     for (let i = 0; i < len; i++) {
       const item = arr[i];
-      
-      // Clone item and add parentId
-      const newItem = this.cloneWithParentId(item, parentIds);
-      
-      // Process children recursively if they exist
-      if (item.children && Array.isArray(item.children)) {
-        newItem.children = this.fastAddParentIds(item.children, parentIds);
+      // If it's an object, clone and add parentId
+      if (this.isObject(item)) {
+        const cloned = this.cloneWithParentId(item, parentIds);
+        // Recursively fix children if present
+        if (Array.isArray(item.children)) {
+          cloned.children = this.fastAddParentIds(item.children, parentIds);
+        }
+        result[i] = cloned;
+      } else {
+        // If it's a primitive, just wrap
+        result[i] = {
+          value: item,
+          parentId: parentIds
+        };
       }
-      
-      result[i] = newItem;
     }
     
     return result;
   }
 
   /**
-   * Index the data for O(1) lookups - optimized for large datasets
+   * Index the data for O(1) lookups.
+   * The data passed here should already be transformed by transformData(...).
    */
-  indexData(data: any): Promise<void> {
+  async indexData(data: any): Promise<void> {
     const startTime = performance.now();
     
-    // Clear existing index
+    // Clear existing indexes
     this.indexedData.clear();
-    
-    // Clear fields cache
     this.fieldsByRoot.clear();
     
-    return new Promise<void>((resolve) => {
-      // For immediate indexing, process all at once
-      const basicIndexStart = performance.now();
-      let precomputeTime = 0;
-      let totalRoots = 0;
-      let totalFields = 0;
-      let totalEntities = 0;
+    // Perform indexing in a single pass
+    for (const rootId in data) {
+      if (!Object.prototype.hasOwnProperty.call(data, rootId)) continue;
+      const rootVal = data[rootId];
+      const rootStart = performance.now();
       
-      // First pass: Basic indexing (fast)
-      for (const rootId in data) {
-        if (!Object.prototype.hasOwnProperty.call(data, rootId)) {
-          continue;
+      this.indexSingleRoot(rootId, rootVal);
+      
+      this.logPerformanceMetric(`Indexing root: ${rootId}`, rootStart);
+    }
+    
+    // Optionally create big __all__ arrays for each root (if configured).
+    if (this.config.createPrecomputedCollections) {
+      const precomputeStart = performance.now();
+      for (const rootId of Array.from(this.indexedData.keys())) {
+        const rootMap = this.indexedData.get(rootId)!;
+        if (this.shouldPrecomputeCollections(rootMap)) {
+          this.createRootAllCollection(rootId);
         }
-        
-        const rootStart = performance.now();
-        this.indexSingleRoot(rootId, data[rootId]);
-        totalRoots++;
-        
-        // Count fields and entities for logging
-        const rootMap = this.indexedData.get(rootId);
-        if (rootMap) {
-          totalFields += rootMap.size;
-          
-          rootMap.forEach(fieldMap => {
-            totalEntities += fieldMap.size;
-          });
-        }
-        
-        this.logPerformanceMetric(`Indexing root: ${rootId}`, rootStart);
       }
-      
-      const basicIndexTime = performance.now() - basicIndexStart;
-      
-      // Second pass: Create pre-computed collections if configured
-      // This is optional and can be skipped to prioritize indexing speed
-      if (this.config.createPrecomputedCollections) {
-        const precomputeStart = performance.now();
+      this.logPerformanceMetric('Precomputation phase', precomputeStart);
+    }
+    
+    this.logPerformanceMetric('Index data', startTime);
+  }
+
+  /**
+   * Index a single root. rootVal can be:
+   *  - an object of { fieldName -> { entityId -> [...objects] } } (transformed entity data)
+   *  - an array (for simple structures)
+   *  - some other object
+   */
+  private indexSingleRoot(rootId: string, rootVal: any): void {
+    this.indexedData.set(rootId, new Map<string, Map<any, any[]>>());
+    const rootMap = this.indexedData.get(rootId)!;
+    
+    // If it's an object that has { field -> { entityId -> any[] } }, index each field
+    if (this.isObject(rootVal)) {
+      // Possibly it's an object of fields (like "legalEntity", "geography", etc.)
+      for (const field in rootVal) {
+        if (!Object.prototype.hasOwnProperty.call(rootVal, field)) continue;
         
-        const rootIds = Array.from(this.indexedData.keys());
-        let precomputedRoots = 0;
+        // Track the fields under this root
+        this.addFieldForRoot(rootId, field);
         
-        for (const rootId of rootIds) {
-          const rootMap = this.indexedData.get(rootId)!;
+        rootMap.set(field, new Map<any, any[]>());
+        const fieldMap = rootMap.get(field)!;
+        
+        const fieldValue = rootVal[field];
+        
+        // If fieldValue is an object of { entityId -> arrayOfItems }
+        // i.e. something like: 
+        //   { ae123: [ {value, parentId}, ...], ae456: [...], ... }
+        if (this.isObject(fieldValue)) {
+          const entityIds = Object.keys(fieldValue);
+          let totalItems = 0;
           
-          // Only create pre-computed collections if the dataset is large enough
-          // to benefit from the optimization
-          if (this.shouldPrecomputeCollections(rootMap)) {
-            const rootPrecomputeStart = performance.now();
-            this.createRootAllCollection(rootId);
-            this.logPerformanceMetric(`Precomputing root: ${rootId}`, rootPrecomputeStart);
-            precomputedRoots++;
+          for (const entityId of entityIds) {
+            const items = fieldValue[entityId];
+            fieldMap.set(entityId, items);
+            totalItems += (items?.length || 0);
+          }
+          
+          // If not skipping, create a __all__ if the dataset is not huge
+          if (!this.config.skipAllCollections && totalItems < 100000) {
+            const allArr: any[] = [];
+            allArr.length = totalItems; // pre-allocate
+            let idx = 0;
+            for (const entityId of entityIds) {
+              const items = fieldValue[entityId];
+              if (Array.isArray(items)) {
+                for (const it of items) {
+                  allArr[idx++] = it;
+                }
+              }
+            }
+            fieldMap.set('__all__', allArr);
           }
         }
-        
-        precomputeTime = performance.now() - precomputeStart;
-        
-        this.logPerformanceMetric('Precomputation phase', precomputeStart, {
-          precomputedRoots,
-          totalRoots
-        });
+        // If it's an array or something else, we store in a single special key
+        else if (Array.isArray(fieldValue)) {
+          fieldMap.set('__all__', fieldValue);
+          
+          // Optionally index by item.id if configured
+          if (this.config.indexArraysById) {
+            for (const item of fieldValue) {
+              if (item && item.id !== undefined) {
+                if (!fieldMap.has(item.id)) {
+                  fieldMap.set(item.id, []);
+                }
+                fieldMap.get(item.id)!.push(item);
+              }
+            }
+          }
+        }
+        // Otherwise, it's some single object or primitive
+        else {
+          // Put it under a default entityId
+          fieldMap.set('__single__', [fieldValue]);
+        }
       }
+    }
+    // If rootVal is an array
+    else if (Array.isArray(rootVal)) {
+      // We'll place it under a special "__default__" field
+      rootMap.set('__default__', new Map<any, any[]>());
+      const defaultMap = rootMap.get('__default__')!;
+      defaultMap.set('__all__', rootVal);
       
-      const totalTime = performance.now() - startTime;
-      
-      if (this.config.logPerformance) {
-        console.log(`[Performance] Indexing summary:`, {
-          totalTime: `${totalTime.toFixed(2)}ms`,
-          basicIndexTime: `${basicIndexTime.toFixed(2)}ms`,
-          precomputeTime: `${precomputeTime.toFixed(2)}ms`,
-          totalRoots,
-          totalFields,
-          totalEntities,
-          memoryUsage: this.getMemoryUsage()
-        });
+      // Optionally index by item.id
+      if (this.config.indexArraysById) {
+        for (const item of rootVal) {
+          if (item && item.id !== undefined) {
+            if (!defaultMap.has(item.id)) {
+              defaultMap.set(item.id, []);
+            }
+            defaultMap.get(item.id)!.push(item);
+          }
+        }
       }
-      
-      resolve();
-    });
+    }
+    // Otherwise, store it as a single item
+    else {
+      rootMap.set('__default__', new Map<any, any[]>());
+      rootMap.get('__default__')!.set('__single__', [rootVal]);
+    }
   }
-  
+
   /**
-   * Determine if we should pre-compute collections for this root
-   * This helps balance indexing speed vs lookup performance
+   * Add a field to fieldsByRoot.
+   */
+  private addFieldForRoot(rootId: string, field: string): void {
+    if (!this.fieldsByRoot.has(rootId)) {
+      this.fieldsByRoot.set(rootId, new Set<string>());
+    }
+    this.fieldsByRoot.get(rootId)!.add(field);
+  }
+
+  /**
+   * Decide whether we should precompute an __all__ array across all fields in the root.
    */
   private shouldPrecomputeCollections(rootMap: Map<string, Map<any, any[]>>): boolean {
     if (!this.config.createPrecomputedCollections) return false;
-    
-    // Skip for very simple structures
-    if (rootMap.size <= 2) return false;
+    if (rootMap.size <= 1) return false;
     
     // If there's a threshold, check if any field exceeds it
     if (this.config.precomputeThreshold) {
-      // Check if any field has more than the threshold items
-      let totalItems = 0;
-      
+      let totalCount = 0;
       for (const fieldMap of rootMap.values()) {
-        if (fieldMap.has('__all__')) {
-          totalItems += fieldMap.get('__all__')!.length;
-          
-          // If any field exceeds the threshold, pre-compute
-          if (totalItems > this.config.precomputeThreshold) {
-            return true;
-          }
+        const allItems = fieldMap.get('__all__');
+        if (Array.isArray(allItems)) {
+          totalCount += allItems.length;
+        }
+        if (totalCount > this.config.precomputeThreshold) {
+          return true;
         }
       }
-      
-      // If total items across all fields exceeds the threshold, pre-compute
-      return totalItems > this.config.precomputeThreshold;
+      return totalCount > this.config.precomputeThreshold;
     }
-    
-    // Default to true if no specific configuration
     return true;
   }
-  
+
   /**
-   * Create an __all__ collection for a root to ensure O(1) lookup
-   * @param rootId The root ID
+   * Create an __all__ array for the entire root to enable fast retrieval.
    */
   private createRootAllCollection(rootId: string): void {
     const rootMap = this.indexedData.get(rootId);
     if (!rootMap) return;
     
-    // Skip if already has __all__ collection
+    // Already has a root-level __all__?
     if (rootMap.has('__all__')) return;
     
-    // Get all fields for this root (excluding special fields)
-    const fields = this.getFieldsForRoot(rootId);
+    // Combine all fieldMap.__all__ across fields
+    const fields = this.fieldsByRoot.get(rootId) || [];
+    let totalSize = 0;
     
-    // If it's a simple array, don't need special handling
-    if (fields.length === 0 && rootMap.has('__default__')) return;
-    
-    // Create __all__ collection that contains all data
-    const allData: any[] = [];
-    
-    // For each field
-    for (let i = 0; i < fields.length; i++) {
-      const fieldName = fields[i];
+    for (const fieldName of fields) {
       const fieldMap = rootMap.get(fieldName);
-      
       if (fieldMap && fieldMap.has('__all__')) {
-        // Add all data from this field
-        allData.push(...fieldMap.get('__all__')!);
+        totalSize += fieldMap.get('__all__')!.length;
       }
     }
     
-    // Store the __all__ collection
-    rootMap.set('__all__', allData);
-  }
-  
-  /**
-   * Append new data to existing indexed data
-   * Allows incremental updates without reindexing everything
-   * @param data New data to append to the existing index
-   */
-  appendData(data: any): Promise<any> {
-    return new Promise<any>((resolve) => {
-      // Transform the new data
-      const transformedData = this.transformData(data);
-      
-      // Index the new data without clearing existing index
-      const startTime = performance.now();
-      
-      for (const rootId in transformedData) {
-        if (Object.prototype.hasOwnProperty.call(transformedData, rootId)) {
-          // If this root doesn't exist yet, create it
-          if (!this.indexedData.has(rootId)) {
-            this.indexSingleRoot(rootId, transformedData[rootId]);
-          } else {
-            // Merge with existing data
-            this.mergeAndIndexRoot(rootId, transformedData[rootId]);
-          }
-        }
-      }
-      
-      const endTime = performance.now();
-      console.log(`Appending completed in ${Math.round(endTime - startTime)}ms`);
-      
-      resolve(transformedData);
-    });
-  }
-  
-  /**
-   * Merge new data with existing indexed data for a specific root
-   * @param rootId The root ID
-   * @param newRootValue The new data to merge
-   */
-  private mergeAndIndexRoot(rootId: string, newRootValue: any): void {
-    const rootMap = this.indexedData.get(rootId)!;
+    const allData = new Array(totalSize);
+    let idx = 0;
     
-    // Handle object types at root level
-    if (newRootValue !== null && typeof newRootValue === 'object' && !Array.isArray(newRootValue)) {
-      // For each field in the new root object
-      for (const field in newRootValue) {
-        if (!Object.prototype.hasOwnProperty.call(newRootValue, field)) continue;
-        
-        // Skip fields not in fieldsToIndex if specified
-        if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(field)) continue;
-        
-        // Create the field map if it doesn't exist
-        if (!rootMap.has(field)) {
-          rootMap.set(field, new Map<any, any[]>());
-        }
-        
-        const fieldMap = rootMap.get(field)!;
-        const fieldValue = newRootValue[field];
-        
-        // Handle objects with entity IDs as keys
-        if (fieldValue !== null && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
-          const entityIds = Object.keys(fieldValue);
-          
-          // Add new entities to the index
-          for (const entityId of entityIds) {
-            const entityValues = fieldValue[entityId];
-            fieldMap.set(entityId, entityValues);
-            
-            // Update __all__ collection if it exists
-            if (fieldMap.has('__all__')) {
-              const allValues = fieldMap.get('__all__')!;
-              allValues.push(...entityValues);
-            }
-          }
-        } 
-        // Handle arrays
-        else if (Array.isArray(fieldValue)) {
-          // Update __all__ collection
-          if (fieldMap.has('__all__')) {
-            const allValues = fieldMap.get('__all__')!;
-            allValues.push(...fieldValue);
-          } else {
-            fieldMap.set('__all__', fieldValue);
-          }
-          
-          // Only index by ID if configured to do so
-          if (this.config.indexArraysById) {
-            const len = fieldValue.length;
-            
-            for (let i = 0; i < len; i++) {
-              const item = fieldValue[i];
-              if (item && item.id !== undefined) {
-                if (!fieldMap.has(item.id)) {
-                  fieldMap.set(item.id, []);
-                }
-                fieldMap.get(item.id)!.push(item);
-              }
-            }
-          }
-        }
-      }
-    } 
-    // Handle arrays at root level
-    else if (Array.isArray(newRootValue)) {
-      // Make sure we have a default map
-      if (!rootMap.has('__default__')) {
-        rootMap.set('__default__', new Map<any, any[]>());
-      }
-      
-      const defaultMap = rootMap.get('__default__')!;
-      
-      // Update __all__ collection
-      if (defaultMap.has('__all__')) {
-        const allValues = defaultMap.get('__all__')!;
-        allValues.push(...newRootValue);
-      } else {
-        defaultMap.set('__all__', newRootValue);
-      }
-      
-      // Only index by ID if configured to do so
-      if (this.config.indexArraysById) {
-        const len = newRootValue.length;
-        
-        for (let i = 0; i < len; i++) {
-          const item = newRootValue[i];
-          if (item && item.id !== undefined) {
-            if (!defaultMap.has(item.id)) {
-              defaultMap.set(item.id, []);
-            }
-            defaultMap.get(item.id)!.push(item);
-          }
+    for (const fieldName of fields) {
+      const fieldMap = rootMap.get(fieldName);
+      if (fieldMap && fieldMap.has('__all__')) {
+        const items = fieldMap.get('__all__')!;
+        for (const it of items) {
+          allData[idx++] = it;
         }
       }
     }
-  }
-  }
-  
-  /**
-   * Index a single root element - extracted for better code organization
-   */
-  private indexSingleRoot(rootId: string, rootValue: any): void {
-    // Initialize the root map
-    this.indexedData.set(rootId, new Map<string, Map<any, any[]>>());
-    const rootMap = this.indexedData.get(rootId)!;
     
-    // Handle object types at root level
-    if (rootValue !== null && typeof rootValue === 'object' && !Array.isArray(rootValue)) {
-      // For each field in the root object
-      for (const field in rootValue) {
-        if (!Object.prototype.hasOwnProperty.call(rootValue, field)) continue;
-        
-        // Skip fields not in fieldsToIndex if specified
-        if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(field)) continue;
-        
-        rootMap.set(field, new Map<any, any[]>());
-        const fieldMap = rootMap.get(field)!;
-        
-        const fieldValue = rootValue[field];
-        
-        // Handle objects with entity IDs as keys
-        if (fieldValue !== null && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
-          const entityIds = Object.keys(fieldValue);
-          const entityCount = entityIds.length;
-          
-          // For large datasets, skip creating all collections if configured
-          const skipAllCollection = this.config.skipAllCollections && entityCount > 10000;
-          
-          if (!skipAllCollection) {
-            // Create a flat collection of all items
-            // Pre-allocate approximate size for better performance
-            const allValues: any[] = [];
-            let approxSize = 0;
-            
-            for (const entityId of entityIds) {
-              const entityValues = fieldValue[entityId];
-              fieldMap.set(entityId, entityValues);
-              
-              if (entityValues && entityValues.length) {
-                approxSize += entityValues.length;
-              }
-            }
-            
-            // Only gather all values if the collection isn't too large
-            if (approxSize < 100000) {
-              allValues.length = approxSize; // Pre-allocate
-              
-              let index = 0;
-              for (const entityId of entityIds) {
-                const entityValues = fieldValue[entityId];
-                if (entityValues && entityValues.length) {
-                  // Manual copy is faster than push for pre-allocated arrays
-                  for (let i = 0; i < entityValues.length; i++) {
-                    allValues[index++] = entityValues[i];
-                  }
-                }
-              }
-              
-              // Trim if necessary
-              if (index < approxSize) {
-                allValues.length = index;
-              }
-              
-              fieldMap.set('__all__', allValues);
-            }
-          } else {
-            // For very large datasets, just index by entity ID
-            for (const entityId of entityIds) {
-              fieldMap.set(entityId, fieldValue[entityId]);
-            }
-          }
-        } 
-        // Handle arrays
-        else if (Array.isArray(fieldValue)) {
-          fieldMap.set('__all__', fieldValue);
-          
-          // Only index by ID if configured to do so
-          if (this.config.indexArraysById) {
-            const len = fieldValue.length;
-            
-            // Fast path for common case of objects with id property
-            for (let i = 0; i < len; i++) {
-              const item = fieldValue[i];
-              if (item && item.id !== undefined) {
-                if (!fieldMap.has(item.id)) {
-                  fieldMap.set(item.id, []);
-                }
-                fieldMap.get(item.id)!.push(item);
-              }
-            }
-          }
-        }
-      }
-    } 
-    // Handle arrays at root level
-    else if (Array.isArray(rootValue)) {
-      rootMap.set('__default__', new Map<any, any[]>());
-      const defaultMap = rootMap.get('__default__')!;
-      
-      defaultMap.set('__all__', rootValue);
-      
-      // Only index by ID if configured to do so
-      if (this.config.indexArraysById) {
-        const len = rootValue.length;
-        
-        for (let i = 0; i < len; i++) {
-          const item = rootValue[i];
-          if (item && item.id !== undefined) {
-            if (!defaultMap.has(item.id)) {
-              defaultMap.set(item.id, []);
-            }
-            defaultMap.get(item.id)!.push(item);
-          }
-        }
-      }
-    }
+    rootMap.set('__all__', new Map<any, any[]>());
+    // We'll store the entire array under __all__ -> __all__
+    rootMap.get('__all__')!.set('__all__', allData);
   }
 
   /**
-   * Lookup data from the indexed structure with O(1) time complexity
-   * Uses adapter service to handle field name mappings
-   * @param rootId The root ID to look up
-   * @param field Optional field within the root
-   * @param parentId Optional parent ID to filter by
-   * @returns The matching data or undefined if not found
+   * Lookup data in O(1) time from the indexed structure.
+   * 
+   * @param rootId - the top-level name (will be mapped by adapter)
+   * @param field - optionally the field name
+   * @param id - optionally the entity ID (or parent ID)
    */
-  lookup(rootId: string, field?: string, parentId?: any): any[] | undefined {
-    // Get the mapped root ID using the adapter service
+  lookup(rootId: string, field?: string, id?: any): any[] | undefined {
+    // Map the rootId
     const mappedRootId = this.adapterService.getFieldName(rootId);
     
-    // Fast path return for non-existent roots
     if (!this.indexedData.has(mappedRootId)) {
       return undefined;
     }
     
     const rootMap = this.indexedData.get(mappedRootId)!;
     
-    // Handle lookup with no field specified
+    // If no field is specified, check if there's a root-level default or a root-level __all__
     if (!field) {
-      if (rootMap.has('__default__')) {
-        return rootMap.get('__default__')!.get('__all__');
+      // If we specifically created a root-level __all__ for everything:
+      if (rootMap.has('__all__')) {
+        const bigMap = rootMap.get('__all__')!;
+        return bigMap.get('__all__') || [];
       }
-      
-      // Only collect all data if necessary
+      // Otherwise, gather all data
       return this.collectAllData(rootMap);
     }
     
-    // Fast path return for non-existent fields
+    // If the field doesn't exist
     if (!rootMap.has(field)) {
       return undefined;
     }
     
     const fieldMap = rootMap.get(field)!;
     
-    // Direct lookup by parent ID
-    if (parentId !== undefined) {
-      return fieldMap.has(parentId) ? fieldMap.get(parentId) : undefined;
+    // If no id is provided, return the entire field
+    if (id === undefined) {
+      return fieldMap.get('__all__') || [];
     }
     
-    // Return all data for this field
-    return fieldMap.get('__all__');
+    // Otherwise, return the array stored at [id] (if any)
+    return fieldMap.get(id);
   }
-  
+
   /**
-   * Helper method to collect all data from a root map
-   * This is optimized for performance by pre-allocating the result array
+   * Collect all items across every field in a root (used if we haven't precomputed).
    */
   private collectAllData(rootMap: Map<string, Map<any, any[]>>): any[] {
-    // Fast path: if we already have a cached __all__ collection, use it
-    if (rootMap.has('__all__')) {
-      return rootMap.get('__all__')!;
+    let totalSize = 0;
+    for (const fieldMap of rootMap.values()) {
+      const arr = fieldMap.get('__all__');
+      if (arr) totalSize += arr.length;
     }
     
-    // Estimate total size to pre-allocate array (avoids expensive resizing)
-    let totalSize = 0;
-    rootMap.forEach(fieldMap => {
-      if (fieldMap.has('__all__')) {
-        totalSize += fieldMap.get('__all__')!.length;
-      }
-    });
-    
-    // Pre-allocate result array
-    const allData = new Array(totalSize);
-    let index = 0;
-    
-    // Use direct iteration instead of forEach for better performance
-    const fieldMaps = Array.from(rootMap.values());
-    for (let i = 0; i < fieldMaps.length; i++) {
-      const fieldMap = fieldMaps[i];
-      if (fieldMap.has('__all__')) {
-        const items = fieldMap.get('__all__')!;
-        // Use direct array copy instead of push for better performance
-        for (let j = 0; j < items.length; j++) {
-          allData[index++] = items[j];
+    const result = new Array(totalSize);
+    let idx = 0;
+    for (const fieldMap of rootMap.values()) {
+      const arr = fieldMap.get('__all__');
+      if (arr) {
+        for (const it of arr) {
+          result[idx++] = it;
         }
       }
     }
     
-    // Trim if necessary
-    if (index < totalSize) {
-      allData.length = index;
-    }
-    
-    return allData;
+    return result;
   }
 
   /**
-   * Initialize the service with data
-   * Returns transformed data and completes indexing
+   * Convenience method to initialize everything in one go:
+   *   1. Transform data
+   *   2. Index data
+   * Returns the transformed data so you can inspect or store it if you like.
    */
   async initialize(data: any, config?: Partial<IndexConfig>): Promise<any> {
-    // Set configuration if provided
     if (config) {
       this.setConfig(config);
     }
     
     console.time('transform');
-    // Transform data (optimized for performance)
     const transformedData = this.transformData(data);
     console.timeEnd('transform');
     
     console.time('index');
-    // Index the data
     await this.indexData(transformedData);
     console.timeEnd('index');
     
     return transformedData;
-  }
-  
-  /**
-   * Get approximate memory usage of the index
-   */
-  getMemoryUsage(): number {
-    let size = 0;
-    let keysCount = 0;
-    let valuesCount = 0;
-    
-    this.indexedData.forEach((rootMap) => {
-      keysCount++;
-      
-      rootMap.forEach((fieldMap) => {
-        keysCount++;
-        
-        fieldMap.forEach((values) => {
-          keysCount++;
-          valuesCount += values ? values.length : 0;
-        });
-      });
-    });
-    
-    // Very rough approximation: 32 bytes per key, 200 bytes per value
-    size = (keysCount * 32) + (valuesCount * 200);
-    
-    return size;
   }
 }

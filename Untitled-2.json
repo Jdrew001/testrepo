@@ -1,0 +1,118 @@
+{
+	"entity": [
+		{
+			"aeId": "ae123",
+			"legalEntity": {
+				"code": "some label",
+				"value": "123",
+				"className": "",
+				"disabled": false,
+			},
+			"geography": [
+				{
+					"label": "Display name",
+					"data": 1,
+					"children": [
+						{
+							"label": "Display name",
+							"data": 1,
+							"childrent": []
+						}
+					]
+				}
+			]
+		}
+	],
+	"testItem": [
+		{
+			"id": 123,
+			"testing": "testing"
+		}
+	],
+	"tree": [
+		{
+			"id": 123,
+			"tree": "tree",
+			"children": [
+				{
+					"id": 123,
+					"tree": "tree",
+					"children": []
+				}
+			]
+		}
+	]
+}
+
+I would want it to turn into these maps
+{
+	"aeGrid": {<---- rootId this comes from a property that we want to replace which will be registered in the adapter service
+		"legalEntity": [ <---- child
+			{
+				"ae123": [ <---- entity id
+					"value": "123", "code": "some label", "className": "", "disabled": false, "parentId": ["ae123"]
+				]
+			},
+			"geography": {
+				"ae123": [
+					{
+						"label": "Display name",
+						"data": 1,
+						"parentId": ["ae123"],
+						"children": [
+							{
+								"label": "Display name",
+								"data": 1,
+								"parentId": ["ae123"]
+								"children": []
+							}
+						]
+					}
+				]
+			}
+		]
+	},
+	"testItem": [< -- these can be put in a map as well but no indexing parentIds needed
+		{
+			"id": 123,
+			"testing": "testing"
+		}
+	],
+	"tree": [
+		{
+			"id": 123,
+			"tree": "tree",
+			"children": [
+				{
+					"id": 123,
+					"tree": "tree",
+					"children": []
+				}
+			]
+		}
+	]
+}
+
+I am using angular and typescript.
+I have a library that is using dynamic form components which is already built.
+
+I want to create an adaptor pattern service (this will be used for the consumer to register what rootId to replace with what field name).
+
+Using the a json adaptor, I want like to do:
+1. I want to replace the rootId with the field that is registered in an adaptor for that rootId.
+
+Also,
+I want to create an index function that will be very efficient o(N) and it will run at init once it gets the reference data.
+	- when we index, we need to be sure to use the adaptor pattern just in case that field is meant to be renamed.
+I want a look up method that will take "rootId", field, parentId (the last two are optional because it might not be nested) and return that data from our map below.
+
+index: Map<string, Map<string, Map<any, any[]>>>
+
+
+I would like you to help me create this design.
+The data will come from a service response so it needs to be dynamic.
+no harding anything - it should all be dynamic!!!
+Also, the parentIds should not be hard coded either
+
+I want as close to o(1) as possible for the index function.
+I want the look up to be very fast o(1)
