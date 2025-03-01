@@ -10,14 +10,20 @@ export type IndexMap = Map<string, Map<string, Map<any, any[]>>>;
  * Extended configuration interface to match what the code actually uses
  */
 export interface IndexConfig {
-  fieldsToIndex?: string[];            // Which fields to index (undefined = all)
-  indexArraysById?: boolean;           // Index arrays by item.id?
-  chunkSize?: number;                  // For potential batch processing
-  skipAllCollections?: boolean;        // Skip creating "__all__" arrays
-  useNullPrototype?: boolean;          // Use Object.create(null)
-  createPrecomputedCollections?: boolean;  
-  precomputeThreshold?: number;        // Only precompute if item count > this
-  logPerformance?: boolean;            // Logs transform/index times to console
+  fieldsToIndex?: string[];
+  indexArraysById?: boolean;
+  chunkSize?: number;
+  skipAllCollections?: boolean;
+  useNullPrototype?: boolean;
+  createPrecomputedCollections?: boolean;
+  precomputeThreshold?: number;
+  logPerformance?: boolean;
+
+  /**
+   * If true, logs the actual data each time a performance metric is printed.
+   * Warning: logging very large data can cause console slowdown.
+   */
+  printDataInLogs?: boolean;
 }
 
 @Injectable({
@@ -38,7 +44,8 @@ export class DataProcessingService {
     useNullPrototype: true,
     createPrecomputedCollections: true,
     precomputeThreshold: 10000,
-    logPerformance: false
+    logPerformance: false,
+    printDataInLogs: false
   };
 
   constructor(private adapterService: ReferenceAdapterService) {}
@@ -51,12 +58,13 @@ export class DataProcessingService {
   }
 
   /**
-   * Log performance metrics if enabled
+   * Logs performance metrics if enabled. Optionally prints data.
    */
   private logPerformanceMetric(
     operation: string, 
     startTime: number, 
-    extraInfo: Record<string, any> = {}
+    extraInfo: Record<string, any> = {},
+    data?: any
   ): void {
     if (!this.config.logPerformance) return;
     
@@ -67,6 +75,11 @@ export class DataProcessingService {
       ...extraInfo,
       duration
     });
+
+    // If we also want to print the data, do so.
+    if (this.config.printDataInLogs && data !== undefined) {
+      console.log(`[Performance] ${operation} - data:`, data);
+    }
   }
 
   /**
@@ -100,7 +113,8 @@ export class DataProcessingService {
         this.logPerformanceMetric(
           `Entity detection for ${rootId}`, 
           detectionStart, 
-          { isEntity, entityType }
+          { isEntity, entityType },
+          this.config.printDataInLogs ? rootValue : undefined
         );
       }
       
@@ -164,11 +178,16 @@ export class DataProcessingService {
       }
     }
     
-    this.logPerformanceMetric('Transform data', startTime, {
-      rootCount: Object.keys(result).length,
-      originalSize: JSON.stringify(data).length, 
-      transformedSize: JSON.stringify(result).length
-    });
+    this.logPerformanceMetric(
+      'Transform data', 
+      startTime, 
+      {
+        rootCount: Object.keys(result).length,
+        originalSize: JSON.stringify(data).length,
+        transformedSize: JSON.stringify(result).length
+      },
+      this.config.printDataInLogs ? result : undefined
+    );
     
     return result;
   }
@@ -234,7 +253,12 @@ export class DataProcessingService {
       
       this.indexSingleRoot(rootId, rootVal);
       
-      this.logPerformanceMetric(`Indexing root: ${rootId}`, rootStart);
+      this.logPerformanceMetric(
+        `Indexing root: ${rootId}`, 
+        rootStart, 
+        {},
+        this.config.printDataInLogs ? rootVal : undefined
+      );
     }
     
     // Optionally create big __all__ arrays for each root (if configured).
@@ -249,7 +273,7 @@ export class DataProcessingService {
       this.logPerformanceMetric('Precomputation phase', precomputeStart);
     }
     
-    this.logPerformanceMetric('Index data', startTime);
+    this.logPerformanceMetric('Index data', startTime, {}, data);
   }
 
   /**
@@ -355,6 +379,8 @@ export class DataProcessingService {
    *  3. Optionally update precomputed collections
    */
   async appendData(data: any): Promise<any> {
+    const startTime = performance.now();
+
     // 1) Transform new data
     const transformedData = this.transformData(data);
 
@@ -382,6 +408,8 @@ export class DataProcessingService {
         }
       }
     }
+
+    this.logPerformanceMetric('Append data', startTime, {}, this.config.printDataInLogs ? data : undefined);
 
     return transformedData;
   }

@@ -28,6 +28,12 @@ export interface IndexConfig {
     
     /** If true, logs performance metrics (transform time, indexing time, etc.) to console. */
     logPerformance?: boolean;
+
+    /**
+   * If true, logs the actual data each time a performance metric is printed.
+   * Warning: logging very large data can cause console slowdown.
+   */
+    printDataInLogs?: boolean;
   }
   
   /**
