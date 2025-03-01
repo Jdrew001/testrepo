@@ -63,18 +63,19 @@ export interface EntityTypeConfig {
   
     /**
      * Enable or disable auto-detection heuristics for arrays that might be "entity arrays."
-     * 
-     * If enabled, the service checks for nested objects and ID-like fields automatically.
      */
     setAutoDetection(enabled: boolean): void;
   
     /**
+     * Enable or disable debug logs for detection heuristics.
+     * If `true`, the service logs console messages about how it decides
+     * whether an array is an entity array, single-item skip logic, ID detection, etc.
+     */
+    setDebugLogs(enabled: boolean): void;
+  
+    /**
      * Given a rootId and an array of items, return whether it’s likely an entity array,
      * and if so, what the entity type is (e.g., "entity" or "auto-detected").
-     * 
-     * **Note**: As of the updated logic, if the array is **flat** (no nested objects),
-     * this will return `isEntity = false`. Only arrays with nested or hierarchical data
-     * are considered entity arrays (unless your custom `detector` says otherwise).
      */
     detectEntityArray(
       rootId: string,
