@@ -255,6 +255,82 @@ export class DataProcessingService {
     this.logPerformanceMetric('Index data', startTime, {}, transformedData);
   }
 
+  /**
+   * mergeChildren:
+   * For a given root (by rootId) and parent (by parentId), append the children array to the parent's "children" field
+   * and re-index each child's properties.
+   *
+   * @param rootId   - The key (or fieldId) for the root reference tree.
+   * @param parentId - The ID of the parent node in the tree.
+   * @param children - An array of child nodes to be added.
+   */
+  public mergeChildren(rootId: string, parentId: string, children: any[]): void {
+    // Ensure the root exists in the index.
+    if (!this.indexedData.has(rootId)) {
+      this.indexedData.set(rootId, new Map<string, Map<any, any[]>>());
+    }
+    const rootMap = this.indexedData.get(rootId)!;
+
+    // Use a fixed field name for the children array (you might allow this to be configurable)
+    const childrenField = "children";
+
+    // Ensure there's a Map for the children field.
+    if (!rootMap.has(childrenField)) {
+      rootMap.set(childrenField, new Map<any, any[]>());
+    }
+    const childrenMap = rootMap.get(childrenField)!;
+
+    // Get the parent's existing children array, or create one.
+    let parentChildren = childrenMap.get(parentId);
+    if (!parentChildren) {
+      parentChildren = [];
+      childrenMap.set(parentId, parentChildren);
+    }
+
+    // Append each child to the parent's children array and index the child's properties.
+    for (const child of children) {
+      parentChildren.push(child);
+      // Optionally, add a parent pointer to the child.
+      child.parentId = parentId;
+      // Index this child so that each property (that we care about) is stored for O(1) lookup.
+      this.indexChild(rootId, parentId, child);
+    }
+  }
+
+  /**
+   * indexChild:
+   * Indexes a single child's properties under a given root and parent grouping.
+   *
+   * @param rootId   - The root key in indexedData.
+   * @param parentId - The parent's id used as grouping.
+   * @param child    - The child object to index.
+   */
+  private indexChild(rootId: string, parentId: string, child: any): void {
+    const rootMap = this.indexedData.get(rootId);
+    if (!rootMap) return;
+    // Iterate over each property in the child.
+    for (const prop in child) {
+      if (!child.hasOwnProperty(prop)) continue;
+      // Skip the "children" property as it's handled separately.
+      if (prop === "children") continue;
+      // Respect config.fieldsToIndex if provided.
+      if (this.config.fieldsToIndex && !this.config.fieldsToIndex.includes(prop)) continue;
+
+      // Ensure a map exists for this property.
+      if (!rootMap.has(prop)) {
+        rootMap.set(prop, new Map<any, any[]>());
+      }
+      const fieldMap = rootMap.get(prop)!;
+
+      // Use parentId as the grouping key.
+      if (!fieldMap.has(parentId)) {
+        fieldMap.set(parentId, []);
+      }
+      // For simplicity, store the child's property value. (You could store the full child or clone it.)
+      fieldMap.get(parentId)!.push(child[prop]);
+    }
+  }
+
   private indexSingleRoot(rootKey: string, rootVal: any): void {
     this.indexedData.set(rootKey, new Map<string, Map<any, any[]>>());
     const rootMap = this.indexedData.get(rootKey)!;
