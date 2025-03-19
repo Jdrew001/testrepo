@@ -169,7 +169,15 @@ function str(key: string, holder: HolderType, limit: number): string {
   }
 }
 
-function beautify(value: any, replacer?: Replacer, space?: number | string, limit?: number): string {
+// Options for the beautify function
+interface BeautifyOptions {
+  replacer?: Replacer;
+  space?: number | string;
+  limit?: number;
+  preserveOrder?: boolean;
+}
+
+function beautify(value: any, options?: BeautifyOptions | Replacer, space?: number | string, limit?: number): string {
   // The stringify method takes a value and an optional replacer, and an optional
   // space parameter, and returns a JSON text. The replacer can be a function
   // that can replace values, or an array of strings that will select the keys.
@@ -179,6 +187,24 @@ function beautify(value: any, replacer?: Replacer, space?: number | string, limi
   let i: number;
   gap = '';
   indent = '';
+  
+  // Handle the case where options is passed as a replacer (for backward compatibility)
+  let replacer: Replacer = null;
+  let preserveOrder = false;
+  
+  if (options) {
+    if (typeof options === 'function' || Array.isArray(options)) {
+      // Old-style calling with replacer as second parameter
+      replacer = options;
+      // Use the other parameters as provided
+    } else {
+      // New-style calling with options object
+      replacer = options.replacer || null;
+      space = options.space !== undefined ? options.space : space;
+      limit = options.limit !== undefined ? options.limit : limit;
+      preserveOrder = options.preserveOrder || false;
+    }
+  }
 
   if (!limit) limit = 0;
 
@@ -199,16 +225,49 @@ function beautify(value: any, replacer?: Replacer, space?: number | string, limi
 
   // If there is a replacer, it must be a function or an array.
   // Otherwise, throw an error.
-  rep = replacer || null;
+  rep = replacer;
   if (replacer && typeof replacer !== 'function' &&
     (typeof replacer !== 'object' ||
       typeof (replacer as ReplacerArray).length !== 'number')) {
     throw new Error('beautifier: wrong replacer parameter');
   }
 
+  // If preserving order, use Object.keys to get the keys in their defined order
+  if (preserveOrder && typeof value === 'object' && value !== null) {
+    const orderedValue = preserveObjectOrder(value);
+    return str('', { '': orderedValue } as HolderType, limit);
+  }
+
   // Make a fake root object containing our value under the key of ''.
   // Return the result of stringifying the value.
   return str('', { '': value } as HolderType, limit);
+}
+
+// Helper function to preserve object property order
+function preserveObjectOrder(obj: any): any {
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+    return obj;
+  }
+  
+  // Create a new object with the same prototype
+  const ordered: any = Object.create(Object.getPrototypeOf(obj));
+  
+  // Get keys and iterate in order they were defined
+  const keys = Object.keys(obj);
+  
+  // Add each property in order
+  keys.forEach(key => {
+    const value = obj[key];
+    
+    // Recursively preserve order for nested objects
+    if (value !== null && typeof value === 'object') {
+      ordered[key] = preserveObjectOrder(value);
+    } else {
+      ordered[key] = value;
+    }
+  });
+  
+  return ordered;
 }
 
 export default beautify;

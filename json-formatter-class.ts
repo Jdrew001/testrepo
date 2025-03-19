@@ -18,6 +18,11 @@ interface FormattingOptions {
    * Custom replacer function or array of keys to include
    */
   replacer?: ((key: string, value: any) => any) | string[] | null;
+  
+  /**
+   * Preserve the order of object properties
+   */
+  preserveOrder?: boolean;
 }
 
 /**
@@ -35,6 +40,7 @@ class JSONFormatter {
       indent: 2,
       lineLimit: 80,
       replacer: null,
+      preserveOrder: true, // Default to preserving order
       ...defaultOptions
     };
   }
@@ -48,12 +54,12 @@ class JSONFormatter {
   public format(data: any, options: Partial<FormattingOptions> = {}): string {
     const resolvedOptions = { ...this.defaultOptions, ...options };
     
-    return beautify(
-      data,
-      resolvedOptions.replacer || null,
-      resolvedOptions.indent,
-      resolvedOptions.lineLimit
-    );
+    return beautify(data, {
+      replacer: resolvedOptions.replacer || null,
+      space: resolvedOptions.indent,
+      limit: resolvedOptions.lineLimit,
+      preserveOrder: resolvedOptions.preserveOrder
+    });
   }
   
   /**
@@ -62,7 +68,11 @@ class JSONFormatter {
    * @returns Formatted JSON string with no indentation
    */
   public formatCompact(data: any): string {
-    return this.format(data, { indent: 0, lineLimit: 0 });
+    return this.format(data, { 
+      indent: 0, 
+      lineLimit: 0,
+      preserveOrder: this.defaultOptions.preserveOrder 
+    });
   }
   
   /**
