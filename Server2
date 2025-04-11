@@ -1,0 +1,334 @@
+```bash
+npm install express cors body-parser --save
+```
+
+2. Create a `server.js` file:
+
+```javascript
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const PORT = 3000;
+
+// Path to your JSON database file
+const dbPath = path.join(__dirname, 'db/db.json'); // Adjust to your actual path
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
+
+// Read the database
+function readDb() {
+  try {
+    const data = fs.readFileSync(dbPath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error reading database:', error);
+    return {};
+  }
+}
+
+// Write to the database
+function writeDb(data) {
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error writing to database:', error);
+    return false;
+  }
+}
+
+// GET - Get the raw database content
+app.get('/api/raw', (req, res) => {
+  try {
+    const content = fs.readFileSync(dbPath, 'utf8');
+    res.send(content);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST - Update the raw database content
+app.post('/api/raw', (req, res) => {
+  try {
+    const { content } = req.body;
+    
+    // Validate JSON
+    JSON.parse(content);
+    
+    fs.writeFileSync(dbPath, content);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// GET - List all endpoints
+app.get('/api', (req, res) => {
+  const db = readDb();
+  res.json(Object.keys(db));
+});
+
+// GET - Get all data (entire database)
+app.get('/api/db', (req, res) => {
+  const db = readDb();
+  res.json(db);
+});
+
+// GET - Get data for a specific endpoint
+app.get('/api/:endpoint', (req, res) => {
+  const { endpoint } = req.params;
+  const db = readDb();
+  
+  if (db[endpoint]) {
+    res.json(db[endpoint]);
+  } else {
+    res.status(404).json({ error: `Endpoint '${endpoint}' not found` });
+  }
+});
+
+// POST - Add an item to an endpoint
+app.post('/api/:endpoint', (req, res) => {
+  const { endpoint } = req.params;
+  const newItem = req.body;
+  const db = readDb();
+  
+  if (!db[endpoint]) {
+    db[endpoint] = [];
+  }
+  
+  // Add ID if not provided
+  if (!newItem.id) {
+    const maxId = db[endpoint].reduce((max, item) => (item.id > max ? item.id : max), 0);
+    newItem.id = maxId + 1;
+  }
+  
+  db[endpoint].push(newItem);
+  
+  if (writeDb(db)) {
+    res.status(201).json(newItem);
+  } else {
+    res.status(500).json({ error: 'Failed to write to database' });
+  }
+});
+
+// PUT - Update an item
+app.put('/api/:endpoint/:id', (req, res) => {
+  const { endpoint, id } = req.params;
+  const updatedItem = req.body;
+  const db = readDb();
+  
+  if (!db[endpoint]) {
+    return res.status(404).json({ error: `Endpoint '${endpoint}' not found` });
+  }
+  
+  const index = db[endpoint].findIndex(item => item.id === parseInt(id));
+  
+  if (index === -1) {
+    return res.status(404).json({ error: `Item with id ${id} not found` });
+  }
+  
+  db[endpoint][index] = { ...db[endpoint][index], ...updatedItem };
+  
+  if (writeDb(db)) {
+    res.json(db[endpoint][index]);
+  } else {
+    res.status(500).json({ error: 'Failed to write to database' });
+  }
+});
+
+// DELETE - Delete an item
+app.delete('/api/:endpoint/:id', (req, res) => {
+  const { endpoint, id } = req.params;
+  const db = readDb();
+  
+  if (!db[endpoint]) {
+    return res.status(404).json({ error: `Endpoint '${endpoint}' not found` });
+  }
+  
+  const index = db[endpoint].findIndex(item => item.id === parseInt(id));
+  
+  if (index === -1) {
+    return res.status(404).json({ error: `Item with id ${id} not found` });
+  }
+  
+  db[endpoint].splice(index, 1);
+  
+  if (writeDb(db)) {
+    res.json({ success: true });
+  } else {
+    res.status(500).json({ error: 'Failed to write to database' });
+  }
+});
+
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+3. Update your package.json scripts:
+
+```json
+"scripts": {
+  "server": "node server.js",
+  "start": "ng serve",
+  "dev": "concurrently \"npm run server\" \"npm run start\""
+}
+```
+
+4. Now, create an Angular service to work with this API:
+
+```typescript
+// db.service.ts
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DbService {
+  private apiUrl = 'http://localhost:3000/api';
+  
+  constructor(private http: HttpClient) { }
+  
+  // Get raw database content for editing
+  getRawDb(): Observable<string> {
+    return this.http.get(`${this.apiUrl}/raw`, { responseType: 'text' });
+  }
+  
+  // Update raw database content
+  updateRawDb(content: string): Observable<any> {
+    return this.http.post(`${this.apiUrl}/raw`, { content });
+  }
+  
+  // Get all available endpoints
+  getEndpoints(): Observable<string[]> {
+    return this.http.get<string[]>(this.apiUrl);
+  }
+  
+  // Get entire database
+  getAllData(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/db`);
+  }
+  
+  // Get data for specific endpoint
+  getEndpointData(endpoint: string): Observable<any[]> {
+    return this.http.get<any[]>(`${this.apiUrl}/${endpoint}`);
+  }
+  
+  // Add item to endpoint
+  addItem(endpoint: string, item: any): Observable<any> {
+    return this.http.post(`${this.apiUrl}/${endpoint}`, item);
+  }
+  
+  // Update item
+  updateItem(endpoint: string, id: number, item: any): Observable<any> {
+    return this.http.put(`${this.apiUrl}/${endpoint}/${id}`, item);
+  }
+  
+  // Delete item
+  deleteItem(endpoint: string, id: number): Observable<any> {
+    return this.http.delete(`${this.apiUrl}/${endpoint}/${id}`);
+  }
+}
+```
+
+5. Now implement your Monaco editor component:
+
+```typescript
+// db-editor.component.ts
+import { Component, OnInit } from '@angular/core';
+import { DbService } from '../services/db.service';
+
+@Component({
+  selector: 'app-db-editor',
+  templateUrl: './db-editor.component.html',
+  styleUrls: ['./db-editor.component.css']
+})
+export class DbEditorComponent implements OnInit {
+  editorOptions = {
+    theme: 'vs-dark',
+    language: 'json',
+    automaticLayout: true,
+    formatOnPaste: true,
+    formatOnType: true
+  };
+  
+  editorContent = '';
+  saveStatus: { type: string, message: string } | null = null;
+  
+  constructor(private dbService: DbService) { }
+  
+  ngOnInit() {
+    this.loadDbContent();
+  }
+  
+  loadDbContent() {
+    this.dbService.getRawDb().subscribe(
+      content => {
+        this.editorContent = content;
+      },
+      error => {
+        this.saveStatus = { 
+          type: 'error', 
+          message: 'Failed to load database: ' + error.message 
+        };
+      }
+    );
+  }
+  
+  saveChanges() {
+    try {
+      // Validate JSON before sending
+      JSON.parse(this.editorContent);
+      
+      this.dbService.updateRawDb(this.editorContent).subscribe(
+        response => {
+          this.saveStatus = { type: 'success', message: 'Database updated successfully!' };
+        },
+        error => {
+          this.saveStatus = { type: 'error', message: 'Failed to update: ' + error.message };
+        }
+      );
+    } catch (error) {
+      this.saveStatus = { type: 'error', message: 'Invalid JSON: ' + error.message };
+    }
+  }
+}
+```
+
+6. The HTML template:
+
+```html
+<!-- db-editor.component.html -->
+<div class="editor-container">
+  <ngx-monaco-editor
+    [options]="editorOptions"
+    [(ngModel)]="editorContent"
+    style="height: 500px; width: 100%;">
+  </ngx-monaco-editor>
+  <div class="actions">
+    <button (click)="saveChanges()">Save Changes</button>
+    <div *ngIf="saveStatus" [ngClass]="saveStatus.type">{{saveStatus.message}}</div>
+  </div>
+</div>
+```
+
+This custom server solution provides:
+
+1. A full REST API for your JSON data
+2. Specific endpoints for getting and updating the raw database
+3. Endpoints for listing all available resources
+4. Standard CRUD operations for each endpoint
+
+The Monaco editor component allows you to edit the entire JSON database and save changes, which immediately take effect in the server.
+
+This gives you complete control over your data and how it's structured, without relying on JSON Server.​​​​​​​​​​​​​​​​
