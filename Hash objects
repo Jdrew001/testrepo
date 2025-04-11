@@ -27,29 +27,44 @@ export async function hashObject(
 /**
  * Creates a deterministic string representation of any JavaScript object.
  * This ensures the same object always produces the same string representation.
+ * Handles circular references to prevent maximum call stack size errors.
  * 
  * @param obj - The object to stringify
+ * @param visited - Set of already visited objects (used internally for recursion)
  * @returns A stable string representation of the object
  */
-function stableStringify(obj: any): string {
+function stableStringify(obj: any, visited: Set<any> = new Set()): string {
   // Handle primitive types directly
   if (obj === null || obj === undefined) return String(obj);
   if (typeof obj !== 'object') return String(obj);
   
-  // Handle arrays by recursively stringifying each element
-  if (Array.isArray(obj)) {
-    return '[' + obj.map(item => stableStringify(item)).join(',') + ']';
+  // Handle circular references
+  if (visited.has(obj)) {
+    return '"[Circular]"';
   }
   
-  // Handle regular objects by sorting keys and recursively stringifying values
-  const keys = Object.keys(obj).sort();
-  const pairs = keys.map(key => {
-    const keyString = JSON.stringify(key);
-    const valueString = stableStringify(obj[key]);
-    return keyString + ':' + valueString;
-  });
+  // Add current object to visited set
+  visited.add(obj);
   
-  return '{' + pairs.join(',') + '}';
+  try {
+    // Handle arrays by recursively stringifying each element
+    if (Array.isArray(obj)) {
+      return '[' + obj.map(item => stableStringify(item, visited)).join(',') + ']';
+    }
+    
+    // Handle regular objects by sorting keys and recursively stringifying values
+    const keys = Object.keys(obj).sort();
+    const pairs = keys.map(key => {
+      const keyString = JSON.stringify(key);
+      const valueString = stableStringify(obj[key], visited);
+      return keyString + ':' + valueString;
+    });
+    
+    return '{' + pairs.join(',') + '}';
+  } finally {
+    // Remove the object from the visited set when we're done with it
+    visited.delete(obj);
+  }
 }
 
 /**
@@ -71,7 +86,24 @@ async function example() {
   const obj2 = { a: 1, b: 2, c: [3, 2, 1] };
   const obj3 = { a: 1, b: 2, c: [1, 2, 3] };
   
+  // Test with regular objects
   console.log(await hashObject(obj1)); // Same hash as obj2
   console.log(await hashObject(obj2)); // Same hash as obj1
   console.log(await hashObject(obj3)); // Different hash
+  
+  // Test with circular references
+  const circularObj = { name: "circular" };
+  circularObj.self = circularObj; // Create circular reference
+  
+  const nestedCircular = {
+    level1: {
+      level2: {
+        level3: {}
+      }
+    }
+  };
+  nestedCircular.level1.level2.level3.back = nestedCircular; // Complex circular reference
+  
+  console.log(await hashObject(circularObj)); // Should handle without error
+  console.log(await hashObject(nestedCircular)); // Should handle without error
 }
