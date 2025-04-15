@@ -1,0 +1,86 @@
+// modify-value.behavior.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { ModifyValueBehavior } from './modify-value.behavior';
+import { CommonHttpService } from '../services/utility/common-http.service';
+import { DependencyAdapterFactoryService } from '../services/dependency-adapter-factory.service';
+import { CommonReferenceService } from '../services/reference/common-reference.service';
+import { IGenericStrategyInterface } from '../strategies/field-strategies/generic-strategy.interface';
+import { DependencyConfig } from '../model/configs/dependency.config';
+import { ModifyValueCustomAttributes } from '../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config';
+import { of } from 'rxjs';
+
+describe('ModifyValueBehavior', () => {
+  let behavior: ModifyValueBehavior;
+  let httpServiceMock: jasmine.SpyObj<CommonHttpService>;
+  let dataAdapterFactoryMock: jasmine.SpyObj<DependencyAdapterFactoryService>;
+  let commonReferenceServiceMock: jasmine.SpyObj<CommonReferenceService>;
+  let mockDataInitializer: any;
+
+  beforeEach(() => {
+    httpServiceMock = jasmine.createSpyObj('CommonHttpService', ['request']);
+    httpServiceMock.request.and.returnValue(of({ data: 'testResponse' }));
+    
+    dataAdapterFactoryMock = jasmine.createSpyObj('DependencyAdapterFactoryService', ['getAdapterByKey']);
+    commonReferenceServiceMock = jasmine.createSpyObj('CommonReferenceService', ['getReference']);
+    
+    mockDataInitializer = jasmine.createSpyObj('DataInitializer', ['updateData']);
+
+    TestBed.configureTestingModule({
+      providers: [
+        ModifyValueBehavior,
+        { provide: CommonHttpService, useValue: httpServiceMock },
+        { provide: DependencyAdapterFactoryService, useValue: dataAdapterFactoryMock },
+        { provide: CommonReferenceService, useValue: commonReferenceServiceMock }
+      ]
+    });
+
+    behavior = TestBed.inject(ModifyValueBehavior);
+    (behavior as any).dataInitializer = mockDataInitializer;
+  });
+
+  it('should be created', () => {
+    expect(behavior).toBeTruthy();
+  });
+
+  it('should make API call when apiToCall exists', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField',
+      formGroup: jasmine.createSpyObj('FormGroup', ['get', 'value'])
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config with API to call
+    const mockDep = {
+      customAttributes: {
+        apiToCall: [{ item: 'test' }]
+      }
+    } as any as DependencyConfig<ModifyValueCustomAttributes>;
+
+    // Simulate console.log
+    spyOn(console, 'log');
+
+    // Call the apply method
+    behavior.apply(mockField, mockDep, {}, {});
+
+    // Verify that HTTP request was made
+    expect(httpServiceMock.request).toHaveBeenCalled();
+  });
+
+  it('should update data directly when no apiToCall exists', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField'
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config without API to call
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<ModifyValueCustomAttributes>;
+
+    // Call the apply method
+    behavior.apply(mockField, mockDep, { testData: 'value' }, {});
+
+    // Verify that data was updated directly
+    expect(mockDataInitializer.updateData).toHaveBeenCalled();
+  });
+});
