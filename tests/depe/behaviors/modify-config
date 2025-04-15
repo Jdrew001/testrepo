@@ -1,0 +1,110 @@
+// modify-config.behavior.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { ModifyConfigBehavior } from './modify-config.behavior';
+import { DependencyAdapterFactoryService } from '../services/dependency-adapter-factory.service';
+import { CommonReferenceService } from '../services/reference/common-reference.service';
+import { IGenericStrategyInterface } from '../strategies/field-strategies/generic-strategy.interface';
+import { ControlStrategy } from '../strategies/field-strategies/control.strategy';
+import { DependencyConfig, DependencyBaseCustomAttributes } from '../model/configs/dependency.config';
+import { Behavior } from '../model/configs/dependency.config';
+
+describe('ModifyConfigBehavior', () => {
+  let behavior: ModifyConfigBehavior;
+  let dataAdapterFactoryMock: jasmine.SpyObj<DependencyAdapterFactoryService>;
+  let commonReferenceServiceMock: jasmine.SpyObj<CommonReferenceService>;
+
+  beforeEach(() => {
+    dataAdapterFactoryMock = jasmine.createSpyObj('DependencyAdapterFactoryService', ['getAdapterByKey']);
+    commonReferenceServiceMock = jasmine.createSpyObj('CommonReferenceService', ['getReference']);
+
+    TestBed.configureTestingModule({
+      providers: [
+        ModifyConfigBehavior,
+        { provide: DependencyAdapterFactoryService, useValue: dataAdapterFactoryMock },
+        { provide: CommonReferenceService, useValue: commonReferenceServiceMock }
+      ]
+    });
+
+    behavior = TestBed.inject(ModifyConfigBehavior);
+  });
+
+  it('should be created', () => {
+    expect(behavior).toBeTruthy();
+  });
+
+  it('should apply HIDE configuration', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField',
+      config: {}
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Call apply with HIDE behavior
+    behavior.apply(mockField, mockDep, {}, Behavior.HIDE);
+
+    // Config should have been set accordingly
+    expect(mockField.config['isHidden']).toBe(true);
+  });
+
+  it('should apply SHOW configuration', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField',
+      config: { isHidden: true }
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Call apply with SHOW behavior
+    behavior.apply(mockField, mockDep, {}, Behavior.SHOW);
+
+    // Config should have been set accordingly
+    expect(mockField.config['isHidden']).toBe(false);
+  });
+
+  it('should apply ENABLE configuration', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField',
+      config: {}
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Call apply with ENABLE behavior
+    behavior.apply(mockField, mockDep, {}, Behavior.ENABLE);
+
+    // Config should have been set accordingly
+    expect(mockField.config['editable']).toBe(true);
+  });
+
+  it('should apply DISABLE configuration', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField',
+      config: { editable: true }
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Call apply with DISABLE behavior
+    behavior.apply(mockField, mockDep, {}, Behavior.DISABLE);
+
+    // Config should have been set accordingly
+    expect(mockField.config['editable']).toBe(false);
+  });
+});

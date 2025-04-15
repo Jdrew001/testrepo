@@ -1,0 +1,75 @@
+// dialog-open.behavior.spec.ts
+import { TestBed } from '@angular/core/testing';
+import { DialogOpenBehavior } from './dialog-open.behavior';
+import { DependencyAdapterFactoryService } from '../services/dependency-adapter-factory.service';
+import { CommonReferenceService } from '../services/reference/common-reference.service';
+import { IDialogService } from '../services/interfaces/dialog-service.interface';
+import { IGenericStrategyInterface } from '../strategies/field-strategies/generic-strategy.interface';
+import { DependencyConfig, DependencyBaseCustomAttributes } from '../model/configs/dependency.config';
+import { of } from 'rxjs';
+
+describe('DialogOpenBehavior', () => {
+  let behavior: DialogOpenBehavior;
+  let dataAdapterFactoryMock: jasmine.SpyObj<DependencyAdapterFactoryService>;
+  let commonReferenceServiceMock: jasmine.SpyObj<CommonReferenceService>;
+  let dialogServiceMock: jasmine.SpyObj<IDialogService>;
+
+  beforeEach(() => {
+    dataAdapterFactoryMock = jasmine.createSpyObj('DependencyAdapterFactoryService', ['getAdapterByKey']);
+    commonReferenceServiceMock = jasmine.createSpyObj('CommonReferenceService', ['getReference']);
+    dialogServiceMock = jasmine.createSpyObj('IDialogService', ['openDialog']);
+    dialogServiceMock.openDialog.and.returnValue(of({ result: 'success' }));
+
+    TestBed.configureTestingModule({
+      providers: [
+        DialogOpenBehavior,
+        { provide: DependencyAdapterFactoryService, useValue: dataAdapterFactoryMock },
+        { provide: CommonReferenceService, useValue: commonReferenceServiceMock },
+        { provide: 'IDialogService', useValue: dialogServiceMock }
+      ]
+    });
+
+    behavior = TestBed.inject(DialogOpenBehavior);
+  });
+
+  it('should be created', () => {
+    expect(behavior).toBeTruthy();
+  });
+
+  it('should throw error if dialog config is missing', () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField'
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config without dialog config
+    const mockDep = {
+      customAttributes: {}
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Expect error when apply is called
+    expect(() => {
+      behavior.apply(mockField, mockDep, {}, {});
+    }).toThrow(new Error('Dialog config missing in Dialog Open Behavior'));
+  });
+
+  it('should call dialog service with correct config', async () => {
+    // Create mock field
+    const mockField = {
+      id: 'testField'
+    } as any as IGenericStrategyInterface;
+
+    // Create mock dependency config with dialog config
+    const mockDep = {
+      customAttributes: {
+        dialogConfig: { value: 'dialogValue' }
+      }
+    } as any as DependencyConfig<DependencyBaseCustomAttributes>;
+
+    // Call the apply method
+    await behavior.apply(mockField, mockDep, { data: 'testData' }, {});
+
+    // Verify that dialog service was called
+    expect(dialogServiceMock.openDialog).toHaveBeenCalled();
+  });
+});
