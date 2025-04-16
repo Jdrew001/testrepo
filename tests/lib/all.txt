@@ -1,0 +1,4633 @@
+// ui-library.config.ts
+import { InjectionToken } from '@angular/core';
+
+export interface UILibraryConfig {
+  showUsages: boolean;
+  drawAddition: boolean;
+  uiLibrary: UILibrary;
+  environment: any;
+}
+
+export enum UILibrary {
+  V1 = 'V1',
+  V2 = 'V2'
+}
+
+export const UI_LIBRARY_CONFIG = new InjectionToken<UILibraryConfig>('UI_LIBRARY_CONFIG');
+export const ENVIRONMENT = new InjectionToken<any>('environment');
+
+// cla-common-ui-module.ts
+import { Injector, NgModule, ModuleWithProviders } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ClaPlanningModule } from './components/cla-planning/cla-planning.module';
+import { FormsModule } from './services/form/common-form.service';
+import { CommonHttpService } from './services/utility/common-http.service';
+import { CommonReferenceService } from './services/reference/common-reference.service';
+import { DependencyHandlerService } from './dependency/services/dependency-handler.service';
+import { EventBusService } from './services/infrastructure/event-bus.service';
+import { FileRegistryService } from './services/form/file-registry.service';
+import { ReferenceAdaptorRegistryService } from './services/reference/reference-adaptor-registry.service';
+import { ServiceLocator } from './services/infrastructure/service-locator.service';
+import { ValidatorRegistryService } from './services/form/validator-registry.service';
+import { CommonFacadeService } from './services/facades/common-facade.service';
+import { ConditionStrategyFactory } from './dependency/factory/condition-strategy.factory';
+import { BehaviorStrategyFactory } from './dependency/factory/behavior-strategy.factory';
+import { LibraryConfigService } from './services/infrastructure/library-config.service';
+import { DynamicDialogService } from './services/form/dynamic-dialog.service';
+import { ClaLogModule } from './components/cla-log/cla-log.module';
+import { SharedBaseModule } from './shared/shared-base.module';
+import { UILibraryConfig, UI_LIBRARY_CONFIG } from './ui-library.config';
+
+@NgModule({
+  declarations: [
+  ],
+  imports: [
+    CommonModule,
+    ClaPlanningModule,
+    FormsModule,
+    ReactiveFormModule,
+    ClaLogModule,
+    SharedBaseModule
+  ],
+  providers: [
+    CommonFormService,
+    CommonHttpService,
+    CommonReferenceService,
+    DependencyHandlerService,
+    EventBusService,
+    FileRegistryService,
+    ReferenceAdaptorRegistryService,
+    ServiceLocator,
+    ValidatorRegistryService,
+    CommonFacadeService,
+    ConditionStrategyFactory,
+    BehaviorStrategyFactory,
+    LibraryConfigService,
+    DynamicDialogService
+  ],
+  exports: [
+    SharedBaseModule
+  ]
+})
+export class ClaCommonUiModule {
+  static forRootConfig(config: UILibraryConfig): ModuleWithProviders<ClaCommonUiModule> {
+    return {
+      ngModule: ClaCommonUiModule,
+      providers: [
+        { provider: UI_LIBRARY_CONFIG, useValue: config }
+      ]
+    };
+  }
+
+  constructor(injector: Injector) {
+    ServiceLocator.setInjector(injector);
+  }
+}
+
+// utils.constant.ts
+export class UtilConstants {
+  public static FORM_CONFIG_KEY: string = 'FormConfig';
+  public static DATA_KEY: string = 'Data';
+  public static REFERENCE_KEY: string = 'Reference';
+}
+
+// pagination.util.ts
+export default class PaginationUtils {
+  static getPagination(start: number, limit: number, totalRows: number): string | undefined {
+    if (totalRows === 0) {
+      return;
+    }
+    
+    let toPages: number = start + limit;
+    
+    if (toPages > totalRows) {
+      toPages = totalRows;
+    }
+    
+    if (totalRows === 0) {
+      return "No Records";
+    } else {
+      return `${start + 1} to ${toPages} of ${totalRows}`;
+    }
+  }
+}
+
+// object.utils.ts
+import { HttpParams } from '@angular/common/http';
+import * as _ from './strategies/field-strategies/generic-strategy.interface';
+
+export const getReducedRecord = <T extends Record<string, any>>(data: any, arr: any[]): T => {
+  return arr.reduce((acc: Record<string, any>, key: any) => {
+    const actualKey: any = getClosestKey(data, key);
+    acc[key] = data[actualKey];
+    return acc;
+  }, {} as Record<string, any>);
+};
+
+export const getReducedHttpParams = (data: any, arr: any[]): HttpParams => {
+  return arr.reduce((acc: HttpParams, key: any) => {
+    const actualKey: any = getClosestKey(data, key);
+    acc = acc.append(key, data[actualKey] ?? '');
+    return acc;
+  }, new HttpParams());
+};
+
+export const getClosestKey = (obj: Record<string, any>, searchKey: string): string => {
+  const lowerSearchKey: string = searchKey.toLowerCase();
+  
+  const exactMatch: string | undefined = Object.keys(obj).find(key => key.toLowerCase() === lowerSearchKey);
+  if (exactMatch) return exactMatch;
+  
+  return Object.keys(obj).reduce((closestMatch: any, currentKey: string) => {
+    const currentKeyLower: string = currentKey.toLowerCase();
+    const distance: number = levenshteinDistance(lowerSearchKey, currentKeyLower);
+    
+    // this allows for minor mistakes (1 character distance)
+    if (distance <= 1) {
+      return currentKey;
+    }
+    
+    return closestMatch;
+  }, null);
+};
+
+// levenshtein distance implementation
+export const levenshteinDistance = (a: string, b: string): number => {
+  const lenA = a.length, lenB = b.length;
+  
+  // Step 1: Create a 2D array (matrix) to store the distances.
+  const dp: number[][] = Array(lenA + 1).fill(0).map(() => Array(lenB + 1).fill(0));
+  
+  //Step 2: Initialize the first row and column
+  //this represents transforming '' (empty string) to/from 'a' or 'b'
+  for (let i = 0; i <= lenA; i++) dp[i][0] = i; // cost of deleting all characters from 'a'
+  for (let j = 0; j <= lenB; j++) dp[0][j] = j; // cost of inserting all characters from 'b'
+  
+  //Step 3: Fill the matrix by comparing characters in 'a' and 'b'
+  for (let i = 1; i <= lenA; i++) {
+    for (let j = 1; j <= lenB; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        // If characters are the same, no cost (copy previous diagonal value)
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        // If characters are different, find the minimum edit operation
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1);
+      }
+    }
+  }
+  
+  return dp[lenA][lenB];
+};
+
+// findSelectedNodes function
+export const findSelectedNodes = (tree: any[], selectedData: string[], idKey: string): any[] => {
+  const matchedNodes: any[] = [];
+  
+  function traverse(node: any): void {
+    if (selectedData.includes(node[idKey])) {
+      matchedNodes.push(node);
+    }
+    
+    if (node.children) {
+      node.children.forEach(traverse);
+    }
+  }
+  
+  tree.forEach(traverse);
+  return matchedNodes;
+};
+
+// Flattening utilities
+export const flattenOneLevel = (obj: any): any => {
+  const result: any = {};
+  
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      const value = obj[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        Object.assign(result, flattenCustomAttributes(obj[key]));
+      } else if (key === 'config' && typeof obj[key] === 'object') {
+        Object.assign(result, flattenCustomAttributes(obj[key]));
+      } else {
+        (result as any)[key] = obj[key];
+      }
+    }
+  }
+  
+  return result;
+};
+
+export const flattenCustomAttributes = (obj: any): any => {
+  if (!obj) return obj;
+  
+  if (Array.isArray(obj)) {
+    return obj.map(flattenCustomAttributes);
+  } else if(typeof obj === 'object') {
+    let newObj: any = {};
+    
+    Object.keys(obj).forEach((key: string) => {
+      if (key === 'customAttributes' && typeof obj[key] === 'object') {
+        Object.assign(newObj, flattenCustomAttributes(obj[key]));
+      } else if (key === 'config' && typeof obj[key] === 'object') {
+        Object.assign(newObj, flattenCustomAttributes(obj[key]));
+      } else {
+        (newObj as any)[key] = obj[key];
+      }
+    });
+    
+    return newObj;
+  }
+  
+  return obj;
+};
+
+// DataInitializer class
+export class DataInitializer {
+  public static initializeData(data: any, fields: Map<string, IGenericStrategyInterface>): Map<string, IGenericStrategyInterface> {
+    if (!data) return new Map<string, IGenericStrategyInterface>();
+    
+    Object.keys(data).forEach((key: string) => {
+      if (data[key] !== undefined && !(data[key] instanceof Array)) this.handleFormArray(key, data, fields);
+      if (data[key] !== undefined && (data[key] instanceof Array)) this.handleFormControl(key, data, fields);
+    });
+    
+    return fields;
+  }
+  
+  public static updateData(data: any, field: IGenericStrategyInterface): void {
+    const mapField = field.get(field.id, field);
+    if (data instanceof Array) this.handleFormArray(field.id, data, mapField);
+    if (!(data instanceof Array)) this.handleFormControl(field.id, data, mapField);
+  }
+  
+  private static handleFormArray(key: string, data: any, fields: Map<string, IGenericStrategyInterface>): void {
+    const field: IGenericStrategyInterface = fields.get(key);
+    if (!field) return;
+    
+    (field.control as FormArray).reset();
+    field.patchValue(data[key] ? data[key] : data);
+    field.updateValueAndValidity();
+    field.data = data[key] ? data[key] : data;
+    field.dataInitialized();
+  }
+  
+  private static handleFormControl(key: string, data: any, fields: Map<string, IGenericStrategyInterface>): any {
+    const field: IGenericStrategyInterface = fields.get(key);
+    if (!field) return;
+    
+    field.patchValue(data[key]);
+    field.updateValueAndValidity();
+    field.data = data[key];
+    field.dataInitialized();
+  }
+}
+
+// CSS Style utilities
+export const parseStyles = (style: string): Record<string, string> => {
+  const styles: Record<string, string> = {};
+  if (!style) return styles;
+  
+  style = style.trim().replace(/;$/, '');
+  const styleDeclarations: string[] = style.split(';').map(decl => decl.trim());
+  
+  styleDeclarations.forEach((decl: string) => {
+    if (!decl || decl.indexOf(':') === -1) return;
+    
+    const colonIndex: number = decl.indexOf(':');
+    const prop: string = decl.substring(0, colonIndex).trim();
+    const value: string = decl.substring(colonIndex + 1).trim();
+    
+    if (prop && value) styles[prop] = value;
+  });
+  
+  return styles;
+};
+
+// Hash object implementation
+export class HashObject {
+  async hashObject(obj: any, algorithms = ['SHA-1', 'SHA-256', 'SHA-384', 'SHA-512']): Promise<string> {
+    // Convert the object to a stable string representation
+    const stringRepresentation: string = this.stableStringify(obj);
+    
+    // Convert string to Uint8Array
+    const encoder = new TextEncoder();
+    const data: Uint8Array = encoder.encode(stringRepresentation);
+    
+    // Use the Web Crypto API to hash the data
+    const hashBuffer: ArrayBuffer = await crypto.subtle.digest(algorithms[0], data);
+    
+    // Convert the hash to a hex string
+    return this.arrayBufferToHex(hashBuffer);
+  }
+  
+  /**
+   * Creates a deterministic string representation of any JavaScript object.
+   * This ensures the same key always produces the same string representation.
+   * This handles circular references to prevent maximum call stack size errors.
+   * 
+   * @param obj - The object to stringify
+   * @param visited - Set of already visited objects (used internally for recursion)
+   * @returns A stable string representation of the object
+   */
+  private stableStringify(obj: any, visited: Set<any> = new Set()): string {
+    // Handle primitive types directly
+    if (obj === null || obj === undefined) return String(obj);
+    if (typeof obj !== 'object') return String(obj);
+    
+    // Handle circular references
+    if (visited.has(obj)) {
+      return "{Circular}";
+    }
+    
+    // Add current object to visited set
+    visited.add(obj);
+    
+    try {
+      // Handle arrays by recursively stringifying each element
+      if (Array.isArray(obj)) {
+        return '[' + obj.map(item => this.stableStringify(item, visited)).join(',') + ']';
+      }
+      
+      // Handle regular objects by sorting keys and recursively stringifying values
+      const keys: string[] = Object.keys(obj).sort();
+      const pairs: string[] = keys.map(key => {
+        const keyString: string = JSON.stringify(key);
+        const valueString: string = this.stableStringify(obj[key], visited);
+        return keyString + ':' + valueString;
+      });
+      
+      return '{' + pairs.join(',') + '}';
+    } finally {
+      // Remove the object from the visited set when we're done with it
+      visited.delete(obj);
+    }
+  }
+  
+  /**
+   * Convert an ArrayBuffer to a hexadecimal string.
+   * 
+   * @param buffer - The ArrayBuffer to convert
+   * @returns A hexadecimal string representation of the buffer
+   */
+  private arrayBufferToHex(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    return Array.from(bytes)
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+}
+
+// Mapping instruction
+import { DataType } from '../models/request-model/data-type.enum';
+
+export class MappingInstruction {
+  public mapFrom: string;
+  public mapTo: string;
+  public dataType: DataType = DataType.DEFAULT;
+  
+  constructor(mappingInstruction: MappingInstruction) {
+    this.mapFrom = mappingInstruction.mapFrom;
+    this.mapTo = mappingInstruction.mapTo;
+    this.dataType = this.isDataType(mappingInstruction.dataType) 
+      ? mappingInstruction.dataType as DataType 
+      : DataType.DEFAULT;
+  }
+  
+  private static isDataType(value: string): boolean {
+    return Object.values(DataType).includes(value as DataType);
+  }
+  
+  public toString(): string {
+    return `${this.mapFrom}:${this.mapTo}:${this.dataType}`;
+  }
+}
+
+// Transformer class
+import { DataType } from '../models/request-model/data-type.enum';
+
+export type TransformFn = (value: any) => any;
+
+export class Transformer {
+  private static transformers: Record<DataType, TransformFn> = {
+    [DataType.ANY]: (value: any): any[] => (value === undefined || value === null ? [] : [value]),
+    [DataType.STRING]: (value: any): string => (value === undefined || value === null ? "" : String(value || "")),
+    [DataType.NUMBER]: (value: any): number => (value === undefined || value === null ? 0 : Number(value || 0)),
+    [DataType.BOOLEAN]: (value: any): boolean => (value === undefined || value === null ? false : Boolean(value)),
+    [DataType.JSON]: (value: any): any => {
+      try {
+        return typeof value === "string" ? JSON.parse(value) : value;
+      } catch (e) {
+        console.error("ERROR INSIDE CATCH BLOCK: Transformer");
+        return null;
+      }
+    },
+    [DataType.DEFAULT]: (value: any): any => value
+  };
+  
+  public static transform(dataType: DataType, value: any): any {
+    return Transformer.transformers[dataType](value);
+  }
+}
+
+// GetPropertyValue function
+import { safeStringify } from './logger.annotation';
+
+export function GetPropertyValue(target: any, propertyKey: string): void {
+  let value: any;
+  const parentClassName: any = target.constructor.name;
+  
+  Object.defineProperty(target, propertyKey, {
+    get: function () {
+      console.log(`Property: ${propertyKey} from class ${parentClassName} with Value: ${value}; Parent: ${this.parentField}`);
+      return value;
+    },
+    set: function (newValue: any): void {
+      value = newValue;
+      console.log(`Setting Property: ${propertyKey} from class ${parentClassName} with Value: ${safeStringify(newValue)}; Parent: ${this.parentField}`);
+      if (this.parentField) {
+        console.log(`Property: ${propertyKey} from class ${parentClassName} with Value: ${safeStringify(newValue)}; Parent: ${this.parentField}`);
+      }
+    },
+    enumerable: true,
+    configurable: true
+  });
+}
+
+// injector-service.decorator.ts
+import { Type } from "@angular/core";
+import { ServiceLocator } from "../services/infrastructure/service-locator.service";
+
+export function InjectService<T>(service: Type<T>): (target: any, propertyKey: string) => void {
+  return function (target: any, propertyKey: string): void {
+    Object.defineProperty(target, propertyKey, {
+      get: () => ServiceLocator.get(service),
+      enumerable: true,
+      configurable: true
+    });
+  };
+}
+
+// log-method.decorator.ts
+export function LogMethod(target: any, propertyKey: string, descriptor: PropertyDescriptor): PropertyDescriptor {
+  const originalMethod: any = descriptor.value;
+  
+  descriptor.value = function (...args: any[]): any {
+    const formattedArgs = args.map((arg: any): void => {
+      typeof arg === 'object' ? safeStringify(arg): arg;
+    });
+    
+    console.groupCollapsed(`** METHOD: ${propertyKey}**`);
+    console.dir(`** ARGS: `, ...formattedArgs, { depth: null });
+    
+    const result: any = originalMethod.apply(this, args);
+    
+    console.dir(`** RETURN VALUE: ${typeof result === 'object' ? safeStringify(result): result}`, { depth: null });
+    console.groupEnd();
+    
+    return result;
+  };
+  
+  return descriptor;
+}
+
+export function safeStringify(obj: any, space = 2): string {
+  const values = new Map<any>();
+  
+  const replacer = (key: string, value: any): any => {
+    if (typeof value === 'object' && value !== null) {
+      if (values.has(value)) return "{Circular}";
+      values.add(value);
+    }
+    return value;
+  };
+  
+  return JSON.stringify(obj, replacer, space);
+}
+
+// mapping-type.decorator.ts
+import "reflect-metadata";
+import { OperationType } from "../model/enums/operation-type.enum";
+
+export function MappingType(operation: OperationType): (target: Function) => void {
+  return function (target: Function): void {
+    Reflect.defineMetadata("mappingType", operation, target);
+  };
+}
+
+// validate-config.decorator.ts
+import { isNotNullOrUndefined } from "codelyzer/util/isNotNullOrUndefined";
+import { BaseConfig } from "../model/configs/base.config";
+import { safeStringify } from "./logger.annotation";
+
+export function ValidateConfig<T extends new (...args: any[]): {}>(Base: T): new(...args: any[]) => {} {
+  return class extends Base {
+    constructor(...args: any[]) {
+      super(...args);
+      
+      const declaredProperties = Reflect.ownKeys(this).filter(
+        key => typeof key === 'string'
+      ) as string[];
+      
+      const missingFields: string[] = declaredProperties.filter(
+        field => isNotNullOrUndefined((this as any)[field])
+      );
+      
+      const parentConfig = ((this as any).parentConfig as BaseConfig<any>)?.field;
+      const parentField: string = ((this as any).parentField);
+      
+      // if (missingFields.length > 0) {
+      //   console.error(`
+      //   Validation Failed in class ${(Base.name)}
+      //   Parent: ${parentField}
+      //   Missing fields -> ${missingFields}
+      //   --------------------------------------
+      //   Custom Config: 
+      //   ${safeStringify(parentConfig?.customAttributes)}`);
+      // }
+    }
+  };
+}
+
+// fade-animation.ts
+import { animate, style, transition, trigger } from "@angular/animations";
+
+export const fadeAnimation = {
+  trigger('fade', {
+    transition(':enter', {
+      style({ opacity: 0 }),
+      animate('50ms ease-in', style({ opacity: 1 })),
+    }),
+    transition(':leave', {
+      animate('50ms ease-in', style({ opacity: 0 })),
+    })
+  })
+};
+
+// positioning.util.scss
+/**
+ * Dynamic Positioning Utility System
+ *
+ * A class-only approach to dynamic positioning using encoded class names
+ * that define the position values directly in the class name.
+ */
+
+/* Base positioning classes */
+.pos-relative { position: relative; }
+.pos-absolute { position: absolute; }
+.pos-fixed { position: fixed; }
+.pos-sticky { position: sticky; }
+.pos-static { position: static; }
+
+/* Dynamic top positions */
+[class*="top-"] { position: var(--pos-type, relative); }
+.top-0 { top: 0; }
+.top-0\.1 { top: 0.1rem; }
+.top-0\.2 { top: 0.2rem; }
+.top-0\.3 { top: 0.3rem; }
+.top-0\.4 { top: 0.4rem; }
+.top-0\.5 { top: 0.5rem; }
+.top-0\.6 { top: 0.6rem; }
+.top-0\.7 { top: 0.7rem; }
+.top-0\.8 { top: 0.8rem; }
+.top-0\.9 { top: 0.9rem; }
+.top-1 { top: 1rem; }
+.top-1\.5 { top: 1.5rem; }
+.top-2 { top: 2rem; }
+.top-2\.5 { top: 2.5rem; }
+.top-3 { top: 3rem; }
+.top-3\.5 { top: 3.5rem; }
+.top-4 { top: 4rem; }
+.top-5 { top: 5rem; }
+.top-6 { top: 6rem; }
+.top-7 { top: 7rem; }
+.top-8 { top: 8rem; }
+.top-9 { top: 9rem; }
+.top-10 { top: 10rem; }
+
+/* Dynamic right positions */
+[class*="right-"] { position: var(--pos-type, relative); }
+.right-0 { right: 0; }
+.right-0\.1 { right: 0.1rem; }
+.right-0\.2 { right: 0.2rem; }
+.right-0\.3 { right: 0.3rem; }
+.right-0\.4 { right: 0.4rem; }
+.right-0\.5 { right: 0.5rem; }
+.right-0\.6 { right: 0.6rem; }
+.right-0\.7 { right: 0.7rem; }
+.right-0\.8 { right: 0.8rem; }
+.right-0\.9 { right: 0.9rem; }
+.right-1 { right: 1rem; }
+.right-1\.5 { right: 1.5rem; }
+.right-2 { right: 2rem; }
+.right-2\.5 { right: 2.5rem; }
+.right-3 { right: 3rem; }
+.right-3\.5 { right: 3.5rem; }
+.right-4 { right: 4rem; }
+.right-5 { right: 5rem; }
+.right-6 { right: 6rem; }
+.right-7 { right: 7rem; }
+.right-8 { right: 8rem; }
+.right-9 { right: 9rem; }
+.right-10 { right: 10rem; }
+
+/* Dynamic bottom positions */
+[class*="bottom-"] { position: var(--pos-type, relative); }
+.bottom-0 { bottom: 0; }
+.bottom-0\.1 { bottom: 0.1rem; }
+.bottom-0\.2 { bottom: 0.2rem; }
+.bottom-0\.3 { bottom: 0.3rem; }
+.bottom-0\.4 { bottom: 0.4rem; }
+.bottom-0\.5 { bottom: 0.5rem; }
+.bottom-0\.6 { bottom: 0.6rem; }
+.bottom-0\.7 { bottom: 0.7rem; }
+.bottom-0\.8 { bottom: 0.8rem; }
+.bottom-0\.9 { bottom: 0.9rem; }
+.bottom-1 { bottom: 1rem; }
+.bottom-1\.5 { bottom: 1.5rem; }
+.bottom-2 { bottom: 2rem; }
+.bottom-2\.5 { bottom: 2.5rem; }
+.bottom-3 { bottom: 3rem; }
+.bottom-3\.5 { bottom: 3.5rem; }
+.bottom-4 { bottom: 4rem; }
+.bottom-5 { bottom: 5rem; }
+.bottom-6 { bottom: 6rem; }
+.bottom-7 { bottom: 7rem; }
+.bottom-8 { bottom: 8rem; }
+.bottom-9 { bottom: 9rem; }
+.bottom-10 { bottom: 10rem; }
+
+/* Dynamic left positions */
+[class*="left-"] { position: var(--pos-type, relative); }
+.left-0 { left: 0; }
+.left-0\.1 { left: 0.1rem; }
+.left-0\.2 { left: 0.2rem; }
+.left-0\.3 { left: 0.3rem; }
+.left-0\.4 { left: 0.4rem; }
+.left-0\.5 { left: 0.5rem; }
+.left-0\.6 { left: 0.6rem; }
+.left-0\.7 { left: 0.7rem; }
+.left-0\.8 { left: 0.8rem; }
+.left-0\.9 { left: 0.9rem; }
+.left-1 { left: 1rem; }
+.left-1\.5 { left: 1.5rem; }
+.left-2 { left: 2rem; }
+.left-2\.5 { left: 2.5rem; }
+.left-3 { left: 3rem; }
+.left-3\.5 { left: 3.5rem; }
+.left-4 { left: 4rem; }
+.left-5 { left: 5rem; }
+.left-6 { left: 6rem; }
+.left-7 { left: 7rem; }
+.left-8 { left: 8rem; }
+.left-9 { left: 9rem; }
+.left-10 { left: 10rem; }
+
+/* Negative positioning classes */
+.top-n0\.1 { top: -0.1rem; }
+.top-n0\.5 { top: -0.5rem; }
+.top-n1 { top: -1rem; }
+.top-n2 { top: -2rem; }
+.top-n3 { top: -3rem; }
+.top-n5 { top: -5rem; }
+
+.right-n0\.1 { right: -0.1rem; }
+.right-n0\.5 { right: -0.5rem; }
+.right-n1 { right: -1rem; }
+.right-n2 { right: -2rem; }
+.right-n3 { right: -3rem; }
+.right-n5 { right: -5rem; }
+
+.bottom-n0\.1 { bottom: -0.1rem; }
+.bottom-n0\.5 { bottom: -0.5rem; }
+.bottom-n1 { bottom: -1rem; }
+.bottom-n2 { bottom: -2rem; }
+.bottom-n3 { bottom: -3rem; }
+.bottom-n5 { bottom: -5rem; }
+
+.left-n0\.1 { left: -0.1rem; }
+.left-n0\.5 { left: -0.5rem; }
+.left-n1 { left: -1rem; }
+.left-n2 { left: -2rem; }
+.left-n3 { left: -3rem; }
+.left-n5 { left: -5rem; }
+
+/* Percentage-based positioning */
+.top-10p { top: 10%; }
+.top-20p { top: 20%; }
+.top-25p { top: 25%; }
+.top-30p { top: 30%; }
+.top-40p { top: 40%; }
+.top-50p { top: 50%; }
+.top-60p { top: 60%; }
+.top-70p { top: 70%; }
+.top-75p { top: 75%; }
+.top-80p { top: 80%; }
+.top-90p { top: 90%; }
+.top-100p { top: 100%; }
+
+.right-10p { right: 10%; }
+.right-20p { right: 20%; }
+.right-25p { right: 25%; }
+.right-30p { right: 30%; }
+.right-40p { right: 40%; }
+.right-50p { right: 50%; }
+.right-60p { right: 60%; }
+.right-70p { right: 70%; }
+.right-75p { right: 75%; }
+.right-80p { right: 80%; }
+.right-90p { right: 90%; }
+.right-100p { right: 100%; }
+
+.bottom-10p { bottom: 10%; }
+.bottom-20p { bottom: 20%; }
+.bottom-25p { bottom: 25%; }
+.bottom-30p { bottom: 30%; }
+.bottom-40p { bottom: 40%; }
+.bottom-50p { bottom: 50%; }
+.bottom-60p { bottom: 60%; }
+.bottom-70p { bottom: 70%; }
+.bottom-75p { bottom: 75%; }
+.bottom-80p { bottom: 80%; }
+.bottom-90p { bottom: 90%; }
+.bottom-100p { bottom: 100%; }
+
+.left-10p { left: 10%; }
+.left-20p { left: 20%; }
+.left-25p { left: 25%; }
+.left-30p { left: 30%; }
+.left-40p { left: 40%; }
+.left-50p { left: 50%; }
+.left-60p { left: 60%; }
+.left-70p { left: 70%; }
+.left-75p { left: 75%; }
+.left-80p { left: 80%; }
+.left-90p { left: 90%; }
+.left-100p { left: 100%; }
+
+/* Pixel-based positions for fine tuning */
+.top-1px { top: 1px; }
+.top-2px { top: 2px; }
+.top-5px { top: 5px; }
+.top-10px { top: 10px; }
+.top-15px { top: 15px; }
+.top-20px { top: 20px; }
+.top-25px { top: 25px; }
+.top-30px { top: 30px; }
+.top-40px { top: 40px; }
+.top-50px { top: 50px; }
+.top-100px { top: 100px; }
+
+.left-1px { left: 1px; }
+.left-2px { left: 2px; }
+.left-5px { left: 5px; }
+.left-10px { left: 10px; }
+.left-15px { left: 15px; }
+.left-20px { left: 20px; }
+.left-25px { left: 25px; }
+.left-30px { left: 30px; }
+.left-40px { left: 40px; }
+.left-50px { left: 50px; }
+.left-100px { left: 100px; }
+
+/* Z-index utilities */
+.z-0 { z-index: 0; }
+.z-1 { z-index: 1; }
+.z-2 { z-index: 2; }
+.z-3 { z-index: 3; }
+.z-4 { z-index: 4; }
+.z-5 { z-index: 5; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-30 { z-index: 30; }
+.z-40 { z-index: 40; }
+.z-50 { z-index: 50; }
+.z-100 { z-index: 100; }
+.z-auto { z-index: auto; }
+.z-n1 { z-index: -1; }
+
+/* Auto positioning for edge alignment */
+.top-auto { top: auto; }
+.right-auto { right: auto; }
+.bottom-auto { bottom: auto; }
+.left-auto { left: auto; }
+
+/* Common positioning patterns */
+.center-xy {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.center-x {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.center-y {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Full coverage positioning */
+.cover-all {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+/* Viewport positioning utilities */
+.viewport-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.viewport-bottom {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Corner positioning */
+.corner-top-left {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.corner-top-right {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.corner-bottom-left {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+}
+
+.corner-bottom-right {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+}
+
+/* Setting position type for position classes */
+.pos-type-relative { --pos-type: relative; }
+.pos-type-absolute { --pos-type: absolute; }
+.pos-type-fixed { --pos-type: fixed; }
+.pos-type-sticky { --pos-type: sticky; }
+
+/* Viewport unit positions (vh/vw) */
+.top-10vh { top: 10vh; }
+.top-20vh { top: 20vh; }
+.top-30vh { top: 30vh; }
+.top-40vh { top: 40vh; }
+.top-50vh { top: 50vh; }
+.top-60vh { top: 60vh; }
+.top-70vh { top: 70vh; }
+.top-80vh { top: 80vh; }
+.top-90vh { top: 90vh; }
+.top-100vh { top: 100vh; }
+
+// strategy-register.constants.ts
+import {ComplexLinkConfig} from "../model/configs/custom-attributes/link-configs/complex-link.config";
+import {RouteLinkConfig} from "../model/configs/custom-attributes/link-configs/route-link.config";
+import {SimpleLinkConfig} from "../model/configs/custom-attributes/link-configs/simple-link.config";
+import {ExternalLinkConfig} from "../model/configs/custom-attributes/link-configs/external-link.config";
+import {ComplexTreeDropdownConfig} from "../model/configs/custom-attributes/tree-configs/complex-tree-dropdown.config";
+import {AccordionTabCustomAttributes} from "../model/configs/custom-attributes/accordion-tab.config";
+import {ButtonCustomConfig} from "../model/configs/custom-attributes/button.config";
+import {GridStrategy} from "../field-strategies/grid-strategy";
+import {SimpleFieldStrategy} from "../field-strategies/simple-field.strategy";
+import {LinkExternalStrategy} from "../field-strategies/link-strategies/link-external";
+import {LinkRouterStrategy} from "../field-strategies/link-strategies/link-router";
+import {AdvancedDialogStrategy} from "../field-strategies/link-strategies/link-simple-dialog";
+import {SimpleLinkStrategy} from "../field-strategies/link-strategies/simple-link.strategy";
+import {ComplexLinkStrategy} from "../field-strategies/link-strategies/complex-link.strategy";
+import {SimpleTreeDropdownStrategy} from "../field-strategies/tree-strategies/simple-tree-dropdown.strategy";
+import {ComplexTreeDropdownStrategy} from "../field-strategies/tree-strategies/complex-tree-dropdown.strategy";
+import {AccordionTabStrategy} from "../field-strategies/accordion-tab-strategies/accordion-tab-strategy";
+import {LogAccordionTabStrategy} from "../field-strategies/accordion-tab-strategies/log-accordion-tab.strategy";
+import {SimpleButtonStrategy} from "../field-strategies/button-strategies/simple-button.strategy";
+import {ControlFactory} from "../factory/control-factory";
+import {MultiSelectConfig} from "../model/configs/custom-attributes/multi-select.config";
+import {MultiSelectStrategy} from "../field-strategies/multi-select.strategy";
+import {TextConfig} from "../model/configs/custom-attributes/text.config";
+import {TextareaConfig} from "../model/configs/custom-attributes/textarea.config";
+import {DynamicDialogConfig} from "../model/configs/custom-attributes/dynamic-dialog.config";
+import {GridHeaderActionFactory} from "../factory/grid-header-strategies/grid-header-action.factory";
+import {AddAllStrategy} from "../grid-header-strategies/strategies/header-actions/add-all.strategy";
+import {UpdateStrategy} from "../grid-header-strategies/strategies/header-actions/update.strategy";
+import {RemoveStrategy} from "../grid-header-strategies/strategies/header-actions/remove.strategy";
+import {BorderlessHeaderStrategy} from "../grid-header-strategies/strategies/header/borderless-header.strategy";
+import {NgCommonHeaderStrategy} from "../grid-header-strategies/strategies/header/ng-common-header.strategy";
+import {ComponentType, GridActionType, GridHeaderType} from "../model/configs/enums";
+import {TypeaheadStrategy} from "../field-strategies/typehead-strategy";
+
+export class StrategyRegisterConstant {
+  public static RegisterComponentTypes(): void {
+    ControlFactory.getInstance().registerStrategy('gridStrategy', GridStrategy);
+    ControlFactory.getInstance().registerStrategy('simpleStrategy', SimpleFieldStrategy);
+    ControlFactory.getInstance().registerStrategy('externalLinkStrategy', LinkExternalStrategy);
+    ControlFactory.getInstance().registerStrategy('routerLinkStrategy', LinkRouterStrategy);
+    ControlFactory.getInstance().registerStrategy('dialogStrategy', AdvancedDialogStrategy);
+    ControlFactory.getInstance().registerStrategy('simpleLinkStrategy', SimpleLinkStrategy);
+    ControlFactory.getInstance().registerStrategy('complexLinkStrategy', ComplexLinkStrategy);
+    ControlFactory.getInstance().registerStrategy('simpleTreeDropdownStrategy', SimpleTreeDropdownStrategy);
+    ControlFactory.getInstance().registerStrategy('complexTreeDropdownStrategy', ComplexTreeDropdownStrategy);
+    ControlFactory.getInstance().registerStrategy('accordionTabStrategy', AccordionTabStrategy);
+    ControlFactory.getInstance().registerStrategy('logAccordionTabStrategy', LogAccordionTabStrategy);
+    ControlFactory.getInstance().registerStrategy('simpleButtonStrategy', SimpleButtonStrategy);
+    ControlFactory.getInstance().registerStrategy('multiSelectStrategy', MultiSelectStrategy);
+    ControlFactory.getInstance().registerStrategy('advancedDialogStrategy', AdvancedDialogStrategy);
+    ControlFactory.getInstance().registerStrategy('typeaheadStrategy', TypeaheadStrategy);
+  }
+
+  static get strategyConfigByTypeMap(): { [GRID: string]: { strategyName: string, customAttribute: any } } {
+    return {
+      [ComponentType.GRID]: {strategyName: 'gridStrategy', customAttribute: GridCustomAttributes },
+      [ComponentType.EXTERNAL_LINK]: {strategyName: 'externalLinkStrategy', customAttribute: ExternalLinkConfig },
+      [ComponentType.ROUTE_LINK]: {strategyName: 'routerLinkStrategy', customAttribute: RouteLinkConfig },
+      [ComponentType.COMPLEX_LINK]: {strategyName: 'complexLinkStrategy', customAttribute: ComplexLinkConfig },
+      [ComponentType.SIMPLE_LINK]: {strategyName: 'simpleLinkStrategy', customAttribute: SimpleLinkConfig },
+      [ComponentType.SIMPLE_TREE_DROPDOWN]: {strategyName: 'simpleTreeDropdownStrategy', customAttribute: null},
+      [ComponentType.COMPLEX_TREE_DROPDOWN]: {strategyName: 'complexTreeDropdownStrategy', customAttribute: ComplexTreeDropdownConfig},
+      [ComponentType.MULTI_SELECT]: {strategyName: 'multiSelectStrategy', customAttribute: MultiSelectConfig},
+      [ComponentType.BUTTON]: {strategyName: 'simpleButtonStrategy', customAttribute: ButtonCustomConfig},
+      [ComponentType.TEXT]: {strategyName: 'simpleStrategy', customAttribute: TextConfig},
+      [ComponentType.TEXTAREA]: {strategyName: 'simpleStrategy', customAttribute: TextareaConfig},
+      [ComponentType.ADVANCED_DIALOG]: {strategyName: 'advancedDialogStrategy', customAttribute: DynamicDialogConfig},
+      [ComponentType.TYPEAHEAD]: {strategyName: 'typeaheadStrategy', customAttribute: null},
+      [ComponentType.ACCORDION]: {strategyName: 'accordionTabStrategy', customAttribute: AccordionTabCustomAttributes},
+      [ComponentType.LOG_ACCORDION]: {strategyName: 'logAccordionTabStrategy', customAttribute: AccordionTabCustomAttributes},
+      [ComponentType.CHECKBOX]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.RADIO]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.CALENDAR]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.DATE]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.NUMBER]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.SELECT]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.TABVIEW]: {strategyName: 'simpleStrategy', customAttribute: null},
+      [ComponentType.TREEVIEW_DROPDOWN]: {strategyName: 'simpleStrategy', customAttribute: null}
+    };
+  }
+
+  public static RegisterGridHeadings(): void {
+    GridHeaderFactory.getInstance().registerStrategy('borderlessHeaderStrategy', BorderlessHeaderStrategy);
+    GridHeaderFactory.getInstance().registerStrategy('commonHeaderStrategy', NgCommonHeaderStrategy);
+  }
+
+  static get strategyHeaderConfigTypeMap(): { [key: string]: { strategyName: string, customAttribute: any, component: any } } {
+    return {
+      [GridHeaderType.COMMON_HEADER]: {strategyName: 'commonHeaderStrategy', customAttribute: null, component: null},
+      [GridHeaderType.BORDERLESS_HEADER]: {strategyName: 'commonHeaderStrategy', customAttribute: null, component: null}
+    };
+  }
+
+  // Grid header actions
+  public static RegisterGridHeadingActions(): void {
+    GridHeaderActionFactory.getInstance().registerStrategy('addAllStrategy', AddAllStrategy);
+    GridHeaderActionFactory.getInstance().registerStrategy('updateStrategy', UpdateStrategy);
+    GridHeaderActionFactory.getInstance().registerStrategy('removeStrategy', RemoveStrategy);
+  }
+
+  static get strategyHeaderActionConfigTypeMap(): { [key: string]: { strategyName: string, customAttribute: any, component: any } } {
+    return {
+      [GridActionType.ADD_ALL]: {strategyName: 'addAllStrategy', customAttribute: null, component: null},
+      [GridActionType.UPDATE]: {strategyName: 'updateStrategy', customAttribute: null, component: null},
+      [GridActionType.REMOVE]: {strategyName: 'removeStrategy', customAttribute: null, component: null}
+    };
+  }
+}
+
+// mock-generic.ts
+import { IGenericStrategyInterface } from "../field-strategies/generic-strategy.interface";
+import { BaseButtonStrategy } from "../field-strategies/button-strategies/base-button.strategy";
+import { MockGenericStrategy } from "./mock-generic";
+
+export const mockBaseButtonStrategy: any = {
+  ...mockGenericStrategy,
+  behaviorStrategyFactory: {
+    getStrategy: jasmine.createSpy('getStrategy'),
+    addBehaviorStrategies: jasmine.createSpy('addBehaviorStrategies')
+  },
+  libConfigService: jasmine.createSpy('libConfigService'),
+  UUID: '',
+  // Form Config Keys
+  formConfigKey: '',
+  dataKey: '',
+  referenceKey: '',
+  apiToCall: {},
+  enabled: true,
+  handleClickEvent: jasmine.createSpy('handleClickEvent'),
+  enable: jasmine.createSpy('enable'),
+  disable: jasmine.createSpy('disable'),
+  editable: jasmine.createSpy('editable'),
+  fetchData: jasmine.createSpy('fetchData'),
+  handleDialogClose: jasmine.createSpy('handleDialogClose'),
+  initializeField: jasmine.createSpy('initializeField'),
+  
+  // Properties
+  control: jasmine.createSpyObj('AbstractControl', ['setValue', 'updateValueAndValidity', 'patchValue']),
+  formGroup: jasmine.createSpyObj('FormGroup', ['get', 'addControl', 'controls', 'patchValue']),
+  component: { outsideClick: jasmine.createSpy('outsideClick') },
+  id: 'test-field-123',
+  entityId: 'entity-456',
+  data: { defaultValue: 'test' },
+  rowId: 'row-789',
+  config: {test: '...'},
+  
+  // Methods
+  getUniqueRowId: () => 'row-789',
+  dependency: {},
+  refData: {},
+  validators: {},
+  libraryConfig: jasmine.createSpyObj('libraryConfig', ['getControl']).and.returnValue(
+    jasmine.createSpyObj('AbstractControl', ['setValue', 'updateValueAndValidity'])
+  ),
+  createControl: jasmine.createSpy('createControl'),
+  dataInitialized: jasmine.createSpy('dataInitialized').and.returnValue({ fieldValue: 'test' }),
+  getFormGroupRowValue: jasmine.createSpy('getFormGroupRowValue'),
+  updateValueAndValidity: jasmine.createSpy('updateValueAndValidity'),
+  updateValidators: jasmine.createSpy('updateValidators'),
+  getValue: jasmine.createSpy('getValue').and.returnValue('test-value'),
+  setValue: jasmine.createSpy('setValue'),
+  patchValue: jasmine.createSpy('patchValue').and.returnValue(null),
+  invalid: jasmine.createSpy('invalid').and.returnValue(true),
+  updateEnabledDisableState: jasmine.createSpy('updateEnabledDisableState'),
+  enable: jasmine.createSpy('enable'),
+  disable: jasmine.createSpy('disable'),
+  editable: jasmine.createSpy('editable').and.returnValue(true),
+  isRequired: jasmine.createSpy('isRequired'),
+  applyBehavior: jasmine.createSpy('applyBehavior')
+};
+
+export const mockGenericStrategy: IGenericStrategyInterface = {
+  // Properties
+  control: jasmine.createSpyObj('AbstractControl', ['setValue', 'updateValueAndValidity', 'patchValue']),
+  formGroup: jasmine.createSpyObj('FormGroup', ['get', 'addControl', 'controls', 'patchValue']),
+  component: { outsideClick: jasmine.createSpy('outsideClick') },
+  id: 'test-field-123',
+  entityId: 'entity-456',
+  data: { defaultValue: 'test' },
+  rowId: 'row-789',
+  config: {test: '...'},
+  
+  // Methods
+  getUniqueRowId: () => 'row-789',
+  dependency: {},
+  refData: {},
+  validators: {},
+  libraryConfig: jasmine.createSpyObj('libraryConfig', ['getControl']).and.returnValue(
+    jasmine.createSpyObj('AbstractControl', ['setValue', 'updateValueAndValidity'])
+  ),
+  createControl: jasmine.createSpy('createControl'),
+  dataInitialized: jasmine.createSpy('dataInitialized').and.returnValue({ fieldValue: 'test' }),
+  getFormGroupRowValue: jasmine.createSpy('getFormGroupRowValue'),
+  updateValueAndValidity: jasmine.createSpy('updateValueAndValidity'),
+  updateValidators: jasmine.createSpy('updateValidators'),
+  getValue: jasmine.createSpy('getValue').and.returnValue('test-value'),
+  setValue: jasmine.createSpy('setValue'),
+  patchValue: jasmine.createSpy('patchValue').and.returnValue(null),
+  invalid: jasmine.createSpy('invalid').and.returnValue(true),
+  updateEnabledDisableState: jasmine.createSpy('updateEnabledDisableState'),
+  enable: jasmine.createSpy('enable'),
+  disable: jasmine.createSpy('disable'),
+  editable: jasmine.createSpy('editable').and.returnValue(true),
+  isRequired: jasmine.createSpy('isRequired'),
+  applyBehavior: jasmine.createSpy('applyBehavior')
+};
+
+// borderless-header.strategy.ts
+import {GridHeaderControl} from "./grid-header-control.strategy";
+import {BaseHeaderConfig} from "../model/configs/grid-header-config/base-header.config";
+
+export class BorderlessHeaderStrategy extends GridHeaderControl {
+  constructor(
+    config: BaseHeaderConfig
+  ) {
+    super(config);
+  }
+
+  override initializeControl(): void {
+    throw new Error("Method not implemented.");
+  }
+}
+
+// grid-header-control.interface.ts
+import {LibraryConfig} from "../../../model/configs/library.config";
+import {BaseComponent} from "../../../components";
+import {BaseConfig, BaseCustomAttributes} from "../../../model/configs/base.config";
+import {ICommonHttpService} from "../../../services/interfaces/common-http";
+
+export interface IGridHeaderControl {
+  commonHttpService: ICommonHttpService;
+  config: BaseHeaderConfig;
+  libConfig: LibraryConfig;
+  component: BaseComponent;
+  headerActionConfig: BaseConfig<BaseCustomAttributes>;
+  configKey: string;
+  
+  initializeControl(): void;
+}
+
+// grid-header-control.strategy.ts
+import {IGridHeaderControl} from "./grid-header-control.interface";
+import {LibraryConfig} from "../../../model/configs/library.config";
+import {BaseComponent} from "../../../components";
+import {BaseConfig, BaseCustomAttributes} from "../../../model/configs/base.config";
+import {ICommonHttpService} from "../../../services/interfaces/common-http";
+import {InjectService} from "../../../utils/decorators/injector-service.decorator";
+
+export abstract class GridHeaderControl implements IGridHeaderControl {
+  @InjectService(CommonHttpService)
+  commonHttpService: ICommonHttpService;
+  
+  libConfig: LibraryConfig;
+  component: BaseComponent;
+  headerActionConfig: BaseConfig<BaseCustomAttributes>[] = [];
+  configKey: string = "Config";
+  
+  abstract initializeControl(): void;
+  
+  protected constructor(
+    public config: BaseHeaderConfig
+  ) {
+    super(config);
+  }
+}
+
+// ng-common-header.strategy.ts
+import {GridHeaderControl} from "./grid-header-control.strategy";
+import {BaseHeaderConfig} from "../model/configs/grid-header-config/base-header.config";
+import {ApiToCall} from "../model/request-model/api-to-call";
+import {checkPartialObjKey} from "../utils";
+
+export class NgCommonHeaderStrategy extends GridHeaderControl {
+  constructor(
+    config: BaseHeaderConfig
+  ) {
+    super(config);
+  }
+
+  override initializeControl(): void {
+    const requests = this.config.apiToCall?.map(item => new ApiToCall(item as ApiToCall)).buildRequest({
+      this.commonHttpService.makeRequests(requests).subscribe((result: any) => {
+        this.headerActionConfig = (result as any)[checkPartialObjKey(result, this.configKey)] ?? [];
+      });
+    });
+  }
+}
+
+// typehead-strategy.ts
+import { AbstractControl, FormControl } from "@angular/forms";
+import { ControlStrategy } from "./control.strategy";
+import { ApiToCall } from "../model/request-model/api-to-call";
+import * as _ from "lodash";
+
+export class TypeaheadStrategy extends ControlStrategy {
+  public suggestions: any[] = [];
+  
+  constructor(public override config: any) {
+    super(config);
+  }
+  
+  override dataInitialized(): void {
+    this.suggestions = _.cloneDeep(this.refData);
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value, this.validators);
+    return this.control;
+  }
+  
+  getSearchRequest(event: any): any {
+    const requests: ApiToCall[] = [];
+    const method: any = this.config?.apiToCall?.method;
+    
+    if (method === 'get') {
+      return new ApiToCall(item => ApiToCall.buildGetRequest({ "typeParam": event.query }));
+    } else {
+      const rootId: any = this?.config?.customAttributes?.rootId;
+      const fg: AbstractControl = this?.formGroup?.get(rootId);
+      return new ApiToCall({ fg?.value, "typeParam": event.query });
+    }
+    
+    return requests;
+  }
+  
+  onChange(): void {
+    this.dependencyHandlerService.publishEvents(this.getUniqueRowId(), this.control.getValue());
+  }
+}
+
+// multi-select.strategy.ts
+import { AbstractControl, FormControl } from "@angular/forms";
+import { ControlStrategy } from "./control.strategy";
+import { BaseConfig } from "../model/configs/base.config";
+import { MultiSelectConfig } from "../model/configs/custom-attributes/multi-select.config";
+import { ApiToCall } from "../model/request-model/api-to-call";
+import * as _ from "lodash";
+import { EMPTY, of } from "rxjs";
+import { debounceTime, filter, switchMap, takeUntil } from "rxjs/operators";
+
+export class MultiSelectStrategy extends ControlStrategy {
+  public options: any[] = [];
+  
+  constructor(public override config: BaseConfig<MultiSelectConfig>) {
+    super(config);
+  }
+  
+  override dataInitialized(): void {
+    this.options = _.cloneDeep(this.refData);
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value, this.validators);
+    return this.control;
+  }
+  
+  onFilter(searchVal: string): void {
+    of(searchVal).pipe(
+      debounceTime(300),
+      filter((value: any): boolean => value.length >= 3),
+      takeUntil(),
+      switchMap((searchVal: any): Observable<any> => this.startSearch(searchVal))
+    ).subscribe(result => {
+      // Handle result
+    });
+  }
+  
+  private startSearch(searchVal: string): Observable<any> {
+    if (this.config.customAttributes?.apiToCall) {
+      const requests: ApiToCall = undefined;
+      new ApiToCall(item => ApiToCall.buildGetRequest({ "typeParam": searchVal }));
+      
+      if (!requests) return EMPTY;
+      
+      return this.commonHttpService.makeRequests(requests).pipe(
+        debounceTime(300),
+        filter((value: any) => value)
+      );
+    } else {
+      const optionValue = this.config.customAttributes?.optionValue as string;
+      return of(this.options.filter((o: any) => o[optionValue].toLowerCase().includes(searchVal.toLowerCase())));
+    }
+  }
+  
+  onSelect(): void {
+    this.dependencyHandlerService.publishEvents(this.getUniqueRowId(), this.control.value);
+  }
+}
+
+// simple-field.strategy.ts
+import { ControlStrategy } from "./control.strategy";
+import { AbstractControl, FormControl } from "@angular/forms";
+import type { BaseConfig } from "../model/configs/base.config";
+
+export class SimpleFieldStrategy extends ControlStrategy {
+  constructor(
+    config: BaseConfig<any>
+  ) {
+    super(config);
+  }
+  
+  dataInitialized(): void {
+    // Initialized
+  }
+  
+  createControl(value: any): AbstractControl {
+    this.control = new FormControl(value, this.validators);
+    return this.control;
+  }
+}
+
+// grid-strategy.ts
+import { ControlStrategy } from "./control.strategy";
+import { AbstractControl, FormArray, FormControl, FormGroup } from "@angular/forms";
+import { ColumnConfiguration, GridCustomAttributes } from "../model/configs/custom-attributes/grid.config";
+import { BaseConfig } from "../model/configs/base.config";
+import { ControlFactory } from "../factory/control-factory";
+import { ApiToCall } from "../model/request-model/api-to-call";
+import { DataInitializer } from "../utils/data-initializer";
+import { flattenOneLevel } from "../utils";
+
+export class GridStrategy extends ControlStrategy {
+  private columns: ColumnConfiguration[] = [];
+  private filterColumns: ColumnConfiguration[] = [];
+  
+  private fields: Record<string, ControlStrategy> = {};
+  get fields(): Record<string, ControlStrategy> { return this._fields; }
+  set fields(value: Record<string, ControlStrategy>) { this._fields = value; }
+  
+  private _actions: GridHeaderActionControl[] = [];
+  get actions(): GridHeaderActionControl[] { return this._actions; }
+  set actions(value: GridHeaderActionControl[]) { this._actions = value; }
+  
+  constructor(
+    public override config: BaseConfig<GridCustomAttributes>
+  ) {
+    super(config);
+    
+    this.columns = (config?.customAttributes?.config?.columnConfiguration as ColumnConfiguration[]) ?? [];
+    this.createControl(null);
+    this.initializeData();
+  }
+  
+  dataInitialized(): void {
+    // Show usages
+  }
+  
+  override initializeField(): void {
+    const requests = this.config.customAttributes?.apiToCall?.map(item => ApiToCall.buildGetRequest(this.libConfig));
+    
+    try {
+      this.commonHttpService.makeRequests(requests).subscribe((result: any) => {
+        const rootLevel: any = result[`${this.config.field}`][this.dataKey];
+        DataInitializer.initializeData(rootLevel, false, result[`${this.config.field}`][this.referenceKey]);
+        
+        this.dependencyHandlerService.publishEvent(this.getUniqueRowId(), 
+          pageSize: this.config.customAttributes?.pageSize,
+          pageIndex: this.config.customAttributes?.pageIndex
+        );
+      });
+    } catch (error) {
+      console.error('ERROR IN ICG ACCORDION TAB STRATEGY', error);
+    }
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormArray(value ?? [], this.validators);
+    return this.control;
+  }
+  
+  createGroup(data: any): FormGroup {
+    let group: FormGroup = new FormGroup({});
+    
+    this.columns.forEach(config => {
+      const strategy = ControlFactory.getInstance().getStrategy(config.field);
+      if (strategy) {
+        strategy.rowId = this.config.field;
+        strategy.entityId = this.config.customAttributes?.uniqueRowId;
+        strategy.data = data;
+        this.addFieldRecord(strategy.id, strategy);
+        group.addControl(config.field, strategy.createControl(data[config.field]));
+        
+        strategy.formGroup = group;
+        strategy.dataInitialized();
+      }
+    });
+    
+    return group;
+  }
+  
+  override patchValue(data: any[]): void {
+    (this.control as FormArray).clear();
+    data.forEach((item: any) => this.addRow(item));
+  }
+  
+  addRow(data: any): void {
+    (this.control as FormArray).push(this.createGroup(data));
+  }
+  
+  addRows(data: any[]): void {
+    data.forEach(row => this.addRow(row));
+  }
+  
+  deleteRow(index: number): void {
+    if ((this.control as FormArray).length > index) {
+      (this.control as FormArray).removeAt(index);
+    }
+  }
+  
+  deleteRows(ids: string[], key: string): void {
+    ids.forEach((id: string) => {
+      const rawValues = (this.control as FormArray).getRawValue() as Array<any>;
+      const index: number = rawValues.findIndex(row => row[key] === id);
+      if (index > -1) {
+        this.deleteRow(index);
+      }
+    });
+  }
+  
+  addFieldRecord(id: string, field: ControlStrategy): void {
+    this.fields[id] = field;
+  }
+  
+  getFieldRecord(id: string): any {
+    return this.fields[id];
+  }
+  
+  handleNeaderAction(action: string): void {
+    console.log('GRID!!', action, this.config.customAttributes);
+  }
+  
+  private handleNestedField(data: any, config: ColumnConfiguration): ControlStrategy {
+    const strategy = ControlFactory.getInstance().getStrategy(config.field) as GridStrategy;
+    if (strategy) {
+      strategy.rowId = this.config.customAttributes?.uniqueRowId;
+      strategy.entityId = this.config.field;
+      strategy.data = data[config.field];
+      this.addFieldRecord(strategy.id, strategy);
+      return strategy;
+    }
+  }
+}
+
+// generic-strategy.interface.ts
+import type { IValidatorRegistryService } from "../services/interfaces/validator-registry";
+import type { ICommonReference } from "../services/interfaces/common-reference";
+import type { IDependencyHandler } from "../services/interfaces/dependency-handler";
+import type { IFieldRegistry } from "../services/interfaces/field-registry";
+import type { ICommonHttpService } from "../services/interfaces/common-http";
+import type { AbstractControl, FormGroup, ValidationErrors, ValidatorFn } from "@angular/forms";
+import type { DependencyConfig } from "../model/configs/dependency.config";
+import type { BaseConfig, BaseCustomAttributes } from "../model/configs/base.config";
+import type { LibraryConfig } from "../model/configs/library.config";
+
+// TODO: Document interface
+export interface IGenericStrategyInterface {
+  validatorService: IValidatorRegistryService;
+  commonReferenceService: ICommonReference;
+  dependencyHandlerService: IDependencyHandler;
+  fieldRegistry: IFieldRegistry;
+  commonHttpService: ICommonHttpService;
+  
+  id: string;
+  control: AbstractControl;
+  formGroup: FormGroup;
+  component: any;
+  rootId: string | null | undefined;
+  entityId: string;
+  data: any;
+  rowId: string | null | undefined;
+  config: BaseConfig<BaseCustomAttributes>;
+  
+  get getUniqueRowId(): string;
+  get dependency(): DependencyConfig<any>[];
+  get refData(): any[] | undefined;
+  get validators(): ValidatorFn[];
+  get libraryConfig(): LibraryConfig;
+  set libraryConfig(value: any);
+  
+  createControl(value: any): AbstractControl;
+  dataInitialized(): void;
+  getFormGroupRowValue(): any;
+  updateValueAndValidity(): void;
+  updateValidators(): void;
+  getValue(): any;
+  setValue(value: any): void;
+  patchValue(value: any): void;
+  getErrors(): ValidationErrors | null;
+  invalid(): boolean;
+  updateEnabledDisableState(state: boolean): void;
+  enable(): void;
+  disable(): void;
+  editable(): boolean;
+  isRequired(): boolean;
+  applyBehavior(behavior: string, config: DependencyConfig<any>, data: any): void;
+}
+
+// File: control.strategy.ts
+import { IGenericStrategyInterface } from './generic-strategy.interface';
+import { AbstractControl, FormControl } from '@angular/forms';
+import type { BaseConfig, BaseCustomAttributes } from '../../../model/configs/base.config';
+
+export abstract class ControlStrategy implements IGenericStrategyInterface {
+  @InjectService(ValidatorRegistryService)
+  validatorService!: IValidatorRegistryService;
+
+  @InjectService(CommonReferenceService)
+  commonReferenceService!: ICommonReference;
+
+  @InjectService(DependencyHandlerService)
+  dependencyHandlerService!: IDependencyHandler;
+
+  @InjectService(FieldRegistryService)
+  fieldRegistry!: IFieldRegistry;
+
+  @InjectService(CommunityService)
+  communityService!: ICommunityService;
+
+  @InjectService(BehaviorStrategyFactory)
+  behaviorStrategyFactory!: IBehaviorStrategyFactory;
+
+  @InjectService(LibraryConfigService)
+  private libConfigService!: ILibraryConfig;
+
+  get libraryConfig(): any { return this.libConfigService.libConfig; }
+  set libraryConfig(value: any) { this.libConfigService.libConfig = value; }
+
+  public id: string;
+  public uuid!: string;
+  public control!: AbstractControl;
+  public formGroup!: FormGroup;
+  public component!: BaseComponent;
+  public rootId!: string | null | undefined;
+  public entityId!: string;
+  public data: any;
+  public rowId!: string | null | undefined;
+
+  protected formConfigKey: string = 'config';
+  protected dataKey: string = 'data';
+  protected referenceKey: string = 'reference';
+
+  get getUniqueRowId(): string {
+    return !this.rowId ? `${this.data[this.rowId]}-${this.config.field}` : this.config.field;
+  }
+
+  get dependency(): DependencyConfig<any>[] { return this.config.dependency; }
+  
+  get refData(): any|undefined { 
+    return this.commonReferenceService.lookup(this.config.field) : 
+           this.commonReferenceService.lookup(this.rootId, this.config.field, this.entityId) ?? [];
+  }
+
+  get apiToCall(): Partial<ApiToCall>[] { return this.config.customAttributes?.apiToCall; }
+
+  get validators(): ValidatorFn[] { return this.validatorService.getValidators(this.config.validators) ?? [] }
+
+  protected constructor(
+    public config: BaseConfig<BaseCustomAttributes>,
+  ) {
+    this.id = this.config.field;
+    this.rootId = this.config.customAttributes?.rootId;
+    this.createControl(null);
+    this.fieldRegistry.register(this);
+    this.dependencyHandlerService.registerDependencies(this, this.dependency);
+    //this.fetchApis();
+  }
+
+  abstract dataInitialized(): void;
+  abstract createControl(value: any): AbstractControl;
+
+  getFormGroupNullValue(): any { return this.formGroup.getRawValue(); }
+
+  fetchApis(): void { 
+    if (this.apiToCall?.length > 0) {
+      const requests: ApiToCall[] = this.apiToCall.map(item => new ApiToCallItem as ApiToCall);
+      this.communityService.makeRequests(requests).subscribe(result => {
+        this.data = result['data'];
+        this.dataInitialized();
+        console.log('result', result, this.data);
+      });
+    };
+  }
+
+  updateValueAndValidity(): void {
+    this.control.updateValueAndValidity();
+  }
+
+  updateValidators(): void {
+    this.control?.setValidators(this.validators);
+    this.updateValueAndValidity();
+  }
+
+  getValue(): any {
+    return this.control.value;
+  }
+
+  setValue(value: any): void {
+    this.control.setValue(value);
+  }
+
+  patchValue(value: any): void {
+    this.control.patchValue(value);
+  }
+
+  getErrors(): ValidationError[] | null {
+    return this.control.errors;
+  }
+
+  isValid(): boolean {
+    return !this.control.invalid;
+  }
+
+  updateEnableDisableState(state: boolean): void {
+    state ? this.enable() : this.disable();
+  }
+
+  enable(): void {
+    this.control.enable();
+    this.config.editable = true;
+  }
+
+  disable(): void {
+    this.control.disable();
+    this.config.editable = false;
+  }
+
+  editable(): boolean {
+    return this.control.enabled;
+  }
+
+  isRequired(): boolean {
+    return this.validators.some(validator => validator === Validators.required);
+  }
+
+  applyBehavior(behavior: string, config: DependencyConfig<any>, data?: any): void {
+    const strategy = this.behaviorStrategyFactory.getStrategy(behavior);
+    if (!strategy) {
+      console.error(`No Behavior Strategy found for behavior: '${behavior}' - please add it to BehaviorStrategyFactory`);
+      return;
+    }
+    strategy.apply(this, config, data);
+  }
+
+  handleApiCallClose(data: any, ref: DynamicDialogRef): void {
+    if (data) {
+      this.control.setValue(data);
+    }
+    setTimeout(() => ref.close(), 1);
+  }
+
+  protected initializeField(): void { throw new Error("initializeField: not implemented!"); }
+}
+
+// File: base-tree.ts
+import { ControlStrategy } from "./control.strategy";
+import { AbstractControl, FormControl } from '@angular/forms';
+import { OverlayPanel } from 'primeng/overlaypanel';
+import * as _ from 'lodash';
+import type { BaseConfig, BaseCustomAttributes } from "../../../model/configs/base.config";
+
+export abstract class BaseTree extends ControlStrategy {
+  overlayPanel!: OverlayPanel;
+  
+  selectedItems: any = [];
+  isOverlayPanelVisible: boolean = false;
+  
+  get preSelectedNodeIds(): any[] {
+    return this.selectedItems.map((node: any): any => { return node['id'] });
+  }
+  
+  constructor(
+    public override config: BaseConfig<BaseCustomAttributes>,
+    public fields?: string[]
+  ) {
+    super(config);
+  }
+  
+  public abstract override dataInitialized(): void;
+  public abstract onNodeSelect(selectedNodes: any, isChildNodesIncluded: any): void;
+  public abstract onNodeDeselect(selectedNodes: any, isChildNodesIncluded: any): void;
+  public abstract onNodeExpand(id: any): void;
+  public abstract updateTreeControl(value: any): void;
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value, this.validators);
+    return this.control;
+  }
+  
+  registerOverlay(overlay: OverlayPanel): void {
+    this.overlayPanel = overlay;
+  }
+  
+  triggerClick(overlay: OverlayPanel, event: any): void {
+    setTimeout(() => {
+      if (!this.isOverlayPanelVisible) {
+        overlay.show(event);
+      } else {
+        overlay.hide();
+      }
+      this.isOverlayPanelVisible = !this.isOverlayPanelVisible;
+    }, 300);
+  }
+  
+  enableAllChildNodes(node: any, isNodeSelected: any): void {
+    if (node.children) {
+      node.children.forEach((n: any): void => {
+        n.selectable = isNodeSelected;
+        if (n.children) {
+          this.enableAllChildNodes(n, isNodeSelected);
+        }
+      });
+    }
+  }
+  
+  checkLeafAndEnableParent(clickedNode: any, isNodeSelected: any): void {
+    let parentOfClickedNode = clickedNode.parent;
+    const parentOfGivenNode: any = parentOfClickedNode;
+    let leafNodes: any = parentOfGivenNode?.children;
+    
+    if (leafNodes?.length) {
+      if (leafNodes?.some((leafNode: any): boolean => 
+        this.preSelectedNodeIds.includes(leafNode as any)['id'])) {
+        leafNodeChecked = true;
+        return true;
+      }
+      return false;
+    }
+  }
+  
+  enableAllParentNodesExceptNotSelectables(node: any, isNodeSelected: any): void {
+    if (node.parent) {
+      node.parent.selectable = isNodeSelected;
+      if (node?.parent?.parent) {
+        this.enableAllParentNodesExceptNotSelectables(node?.parent, isNodeSelected);
+      }
+    }
+  }
+  
+  iterateAndDisableParentNodes(clickedNode: any): void {
+    if (clickedNode.children?.length) {
+      clickedNode.children.forEach((childNode: any): void => {
+        childNode['selectable'] = false;
+        this.iterateAndDisableParentNodes(childNode);
+      });
+    }
+  }
+  
+  iterateAndDisableChildNodes(clickedNode: any): void {
+    if (clickedNode.children?.length) {
+      clickedNode.children.forEach((childNode: any): void => {
+        childNode['selectable'] = false;
+        this.iterateAndDisableChildNodes(childNode);
+      });
+    }
+  }
+  
+  iterateAndSelectChildNodes(selectedNode: any): void {
+    if (selectedNode && selectedNode.children) {
+      selectedNode.children.forEach((childNode: any): void => {
+        childNode['selectable'] = true;
+        this.selectedItems.push(childNode);
+        this.iterateAndSelectChildNodes(childNode);
+      });
+    }
+  }
+  
+  iterateAndDeSelectChildNodes(selectedNode: any): void {
+    if (selectedNode && selectedNode.children) {
+      selectedNode.children.forEach((childNode: any): void => {
+        childNode['selectable'] = true;
+        this.selectedItems = this.selectedItems.filter((item: any) => item !== childNode);
+        this.iterateAndDeSelectChildNodes(childNode);
+      });
+    }
+  }
+  
+  notSelectableIds(refData: any[]): any[] {
+    return _.cloneDeep(refData).reduce((acc: number[], node: any) => {
+      if (node.disabled) {
+        acc.push(node.id);
+      }
+      
+      if (node.children && Array.isArray(node.children)) {
+        acc.push(...this.notSelectableIds(node.children));
+      }
+      
+      return acc;
+    }, []);
+  }
+  
+  private getMatchingNodes(
+    selectedItems: (string | Partial<any>)[],
+    refData: any[] | undefined,
+    key: string
+  ) {
+    const matches: any[] = [];
+    
+    const traverseTree = (nodes: TreeNode[]): void => {
+      for (const node of nodes) {
+        const nodeValue = (node as any)[key];
+        
+        for (const selectedItem of selectedItems) {
+          if (selectedItem !== null && nodeValue === selectedItem) {
+            matches.push(node);
+            break;
+          }
+        }
+        
+        if (node.children && Array.isArray(node.children)) {
+          traverseTree(node.children);
+        }
+      }
+    };
+    
+    traverseTree(refData as any[]);
+    return matches;
+  }
+}
+
+// File: complex-tree-dropdown.strategy.ts
+import { BaseTree } from "./base-tree";
+import { TreeNode } from "primeng/api";
+import { SelectionMode } from "../../collections/objects.utils";
+import type { BaseConfig } from "../../../model/configs/base.config";
+import { 
+  ComplexTreeDropdownConfig, 
+  SelectionMode 
+} from "../../../model/configs/custom-attributes/tree-configs/complex-tree-dropdown.config";
+import * as _ from "lodash";
+import { ApiToCall } from "../../../model/request-model/api-to-call";
+
+export class ComplexTreeDropdownStrategy extends BaseTree {
+  get selectionMode(): SelectionMode | undefined { return this.config.customAttributes?.selectionMode; }
+  
+  constructor(
+    public override config: BaseConfig<ComplexTreeDropdownConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+  
+  dataInitialized(): void {
+    this.markDisabledNodes(this.refData);
+    this.selectedItems = this.getMatchingNodes(this.control.value, this.refData, this.config.customAttributes?.key);
+    this.formatObjects();
+  }
+  
+  public onNodeSelect(selectedNodes: any, isChildNodeIncluded: boolean): void {
+    // format objects based on some format?
+    if (this.config.customAttributes?.allowDuplicateWithinTree) {
+      this.enableAllChildNodes(selectedNodes, false);
+      this.checkLeafAndEnableParent(selectedNodes, false);
+    }
+    
+    if (this.config.customAttributes?.includeChildNodes && isChildNodeIncluded) {
+      this.iterateAndSelectChildNodes(selectedNodes);
+    }
+    
+    this.formatObjects();
+    const update = this.config.customAttributes?.treeKeyData ? this.selectedItems.map(({item}: any): any => item[this.config.customAttributes?.key]) : 
+                                                           this.preSelectedNodeIds;
+    this.control.patchValue(update);
+    this.updateValueAndValidity();
+    this.component.outForm?.next(this.selectedItems);
+  }
+  
+  public onNodeDeselect(selectedNodes: any, isChildNodeIncluded: boolean): void {
+    if (this.config.customAttributes?.allowDuplicateWithinTree) {
+      this.enableAllChildNodes(selectedNodes, false);
+      this.checkLeafAndEnableParent(selectedNodes, false);
+    }
+    
+    if (this.config.customAttributes?.includeChildNodes && isChildNodeIncluded) {
+      this.iterateAndDeSelectChildNodes(selectedNodes);
+    }
+    
+    this.formatObjects();
+    const update = this.config.customAttributes?.treeKeyData ? this.selectedItems.map(({item}: any): any => item[this.config.customAttributes?.key]) : 
+                                                           this.preSelectedNodeIds;
+    this.control.patchValue(update);
+    this.updateValueAndValidity();
+    this.component.outForm?.next(this.selectedItems);
+  }
+  
+  public onNodeExpand(node: any): void {
+    if (this.config.customAttributes?.lazyLoaded) return;
+    const id = node[this.config.customAttributes?.key ?? ""];
+    const children = node.children ?? [];
+    
+    if (node.leaf && children.length === 0) {
+      const requests: ApiToCall[] = this.config.customAttributes?.apiToCall?.map(item => new ApiToCallItem as ApiToCall) ?? 
+                                    buildApiBody({...this.config.customAttributes, ...[this.config.customAttributes?.key ?? ""]: id????});
+      if (!requests) return;
+      
+      this.communityService.makeRequests(requests).subscribe(refData => {
+        this.commonReferenceService.appendData(false, {[this.fieldId]: refData[this.fieldId]}, id, this.config.customAttributes);
+      });
+    }
+  }
+  
+  formatObjects(): void {
+    if (this.selectionMode !== SelectionMode.SINGLE) {
+      const items = _.cloneDeep(this.refData);
+      this.component.template = this.config.customAttributes?.buttonLabel + (_.isEmpty(items) ? "(0 items)" : `(${items.length} ${items.length > 1 ? "items" : "item"})`);
+    } else {
+      this.component.template = this.config.customAttributes?.buttonLabel + Array.isArray(this.selectedItems) ? this.selectedItems[0] : '';
+      if(this.overlayPanel) this.overlayPanel.hide();
+      this.isOverlayPanelVisible = !this.isOverlayPanelVisible;
+    }
+  }
+
+  iterateAndDisableParentNodes(clickedNode: any): void {
+    let parentOfClickedNode = clickedNode.parent;
+    if (parentOfClickedNode && 
+        parentOfClickedNode.hasOwnProperty('id') && 
+        parentOfClickedNode['id']) {
+      parentOfClickedNode['selectable'] = false;
+      parentOfClickedNode['partiallySelected'] = false;
+      this.iterateAndDisableParentNodes(parentOfClickedNode);
+    }
+  }
+
+  iterateAndDisableChildNodes(clickedNode: any): void {
+    if (clickedNode.children?.length) {
+      clickedNode.children.forEach((childNode: any): void => {
+        childNode['selectable'] = false;
+        this.iterateAndDisableChildNodes(childNode);
+      });
+    }
+  }
+}
+
+// File: simple-tree-dropdown.strategy.ts
+import { BaseTree } from "./base-tree";
+import type { BaseConfig } from "../../../model/configs/base.config";
+import { 
+  ComplexTreeDropdownConfig 
+} from "../../../model/configs/custom-attributes/tree-configs/complex-tree-dropdown.config";
+
+export class SimpleTreeDropdownStrategy extends BaseTree {
+  constructor(
+    public override config: BaseConfig<ComplexTreeDropdownConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+  
+  dataInitialized(): void {
+    // Initialized
+  }
+  
+  public onNodeSelect(selectedNodes: any): void {
+    throw new Error("Method not implemented.");
+  }
+  
+  public onNodeDeselect(selectedNodes: any): void {
+    throw new Error("Method not implemented.");
+  }
+  
+  public onNodeExpand(id: any): void {
+    throw new Error("Method not implemented.");
+  }
+  
+  public updateTreeControl(value: any): void {}
+}
+
+// File: base-link.ts
+import { ControlStrategy } from "./control.strategy";
+import { AbstractControl, FormControl } from "@angular/forms";
+import type { BaseConfig, BaseCustomAttributes } from "../../../model/configs/base.config";
+
+export abstract class BaseLink extends ControlStrategy {
+  public abstract handleLinkClick(fromData: any, ...params: any[]): void;
+  
+  constructor(
+    public override config: BaseConfig<BaseCustomAttributes>,
+    public fieldId: string
+  ) {
+    super(config);
+  }
+  
+  dataInitialized(): void {
+    // Initialized
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value, this.validators);
+    return this.control;
+  }
+}
+
+// File: link-external.strategy.ts
+import { BaseLink } from "./base-link";
+import type { BaseConfig } from "../../../model/configs/base.config";
+import { ExternalLinkConfig } from "../../../model/configs/custom-attributes/link-configs/external-link.config";
+
+export class LinkExternalStrategy extends BaseLink { 
+  get navTo(): string | null | undefined { return this.config.customAttributes?.navTo; } 
+  get serverParams(): any | null | undefined { return this.config.customAttributes?.serverParams; } 
+  get info(): any | null | undefined { return this.config.customAttributes?.portalInfo?.info; } 
+  get requestDomain(): string | undefined { return this.config.customAttributes?.portalInfo?.requestDomain } 
+  get responseDomain(): string | undefined { return this.config.customAttributes?.portalInfo?.responseDomain } 
+  get requestType(): string | undefined { return this.config.customAttributes?.portalInfo?.requestType } 
+  
+  parent: any = parent;
+  
+  get originLocation(): string {
+    const appUrl = (window.location != window.parent.location) ? document.referrer : document.location.href;
+    return appUrl ? appUrl.substr(0, appUrl.lastIndexOf('/')) : '';
+  }
+  
+  constructor(
+    public override config: BaseConfig<ExternalLinkConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+  
+  handleLinkClick(fromData: any): void {
+    const requestParams = {
+      requestDomain: this.requestDomain,
+      responseDomain: this.responseDomain,
+      requestType: this.requestType,
+      url: this.replaceNavParams(fromData)
+    }
+    
+    const requestParamStr = JSON.stringify(requestParams);
+    this.parent.window.postMessage(requestParamStr, this.originLocation);
+  }
+  
+  private replaceNavParams(fromData: any): string {
+    let _navTo: string = '';
+    let replacements: any = {
+      rid: this.rid,
+      ...fromData
+    }
+    
+    this.navToParams?.forEach((param: string) => {
+      let regex = new RegExp(`{{${param}}}`, 'g');
+      if (replacements[param] !== undefined) {
+        _navTo = this.navTo?.replace(regex, replacements[param]);
+      }
+    });
+    
+    return _navTo;
+  }
+}
+
+// File: complex-link.strategy.ts
+import { BaseLink } from "./base-link";
+import { InjectService } from "../../../utils/decorators/injector-service.decorator";
+import { BaseConfig } from "../../../model/configs/base.config";
+import { ComplexLinkConfig } from "../../../model/configs/custom-attributes/link-configs/complex-link.config";
+import { IDynamicDialogService } from "../../../services/interfaces/dialog-service.interface";
+import { DynamicDialogService } from "../../../services/core/dynamic-dialog.service";
+
+export class ComplexLinkStrategy extends BaseLink {
+  @InjectService(DynamicDialogService)
+  private dialogService!: IDynamicDialogService;
+  
+  get dialogConfig(): Partial<IDialogConfig> { 
+    return this.config.customAttributes?.dialogConfig.find(item => item.id === this.config.field);
+  }
+  
+  constructor(
+    public override config: BaseConfig<ComplexLinkConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+  
+  public async handleLinkClick(data: any): Promise<void> {
+    await this.dialogService.openDialog(this.dialogConfig, data);
+  }
+}
+
+// File: link-router.strategy.ts
+import {BaseLink} from "./base-link";
+import {Router} from "@angular/router";
+import {InjectService} from "../../../utils/decorators/injector-service.decorator";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {RouteLinkConfig} from "../../../model/configs/custom-attributes/link-configs/route-link.config";
+
+export class LinkRouterStrategy extends BaseLink {
+  get navToParams(): string[] | null | undefined { return this.config?.customAttributes?.navToParams; }
+  get navTo(): string | null | undefined { return this.config?.customAttributes?.navTo; }
+
+  @InjectService(Router)
+  private router!: Router;
+
+  constructor(
+    public override config: BaseConfig<RouteLinkConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+
+  public handleLinkClick(fromData: any): void {
+    let param: {} = {};
+    this.navToParams?.forEach((element: string): void => {
+      (param as any)[element] = fromData;
+    });
+    this.router.navigate([this.navTo], {
+      queryParams: param
+    });
+  }
+}
+
+// File: simple-link.strategy.ts
+import {BaseLink} from "./base-link";
+import {InjectService} from "../../../utils/decorators/injector-service.decorator";
+import {DialogService} from "primeng/dynamicdialog";
+import {of} from "rxjs";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {SimpleLinkConfig} from "../../../model/configs/custom-attributes/link-configs/simple-link.config";
+import {ICommonRenderService} from "../../../services/interfaces/common-render.interface";
+import {CommonRenderService} from "../../../services/utility/common-render.service";
+import {ComponentType} from "../../../model/config.enums";
+
+export class SimpleLinkStrategy extends BaseLink {
+  @InjectService(DialogService)
+  private dialogService!: DialogService;
+
+  @InjectService(CommonRenderService)
+  private commonRenderService!: ICommonRenderService;
+
+  constructor(
+    public override config: BaseConfig<SimpleLinkConfig>,
+    fieldId: string
+  ) {
+    super(config, fieldId);
+  }
+
+  public async handleLinkClick(fromData: any): Promise<void> {
+    const dialog: Type<any> = await this.commonRenderService.getComponentByComponentType(ComponentType.ADVANCED_DIALOG);
+    if (!dialog) {
+      console.error("ADVANCED DIALOG IS NULL", dialog);
+      return;
+    }
+
+    this.dialogService.open(
+      dialog, {
+        header: this.config.displayName ?? this.config.columnName,
+        width: "60%",
+        data: {
+          ...of({[this.fieldId]: fromData[this.fieldId]}),
+          parentStrategy: this
+        }
+      }
+    );
+  }
+}
+
+// File: base-button.strategy.ts
+import {ControlStrategy} from "./control.strategy";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {ButtonCustomConfig} from "../../../model/configs/custom-attributes/button.config";
+
+export abstract class BaseButtonStrategy extends ControlStrategy {
+  enabled: boolean = true;
+
+  constructor(
+    config: BaseConfig<ButtonCustomConfig>
+  ) {
+    super(config);
+  }
+
+  dataInitialized(): void {
+    // Initialized
+  }
+
+  public abstract handleClickEvent(params?: any): void;
+
+  override enable(): void {
+    this.enabled = true;
+  }
+
+  override disable(): void {
+    this.enabled = false;
+  }
+
+  override editable(): boolean {
+    return this.enabled;
+  }
+}
+
+// File: simple-button.strategy.ts
+import {BaseButtonStrategy} from "./base-button.strategy";
+import {AbstractControl, FormControl} from "@angular/forms";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {ButtonCustomConfig} from "../../../model/configs/custom-attributes/button.config";
+
+export class SimpleButtonStrategy extends BaseButtonStrategy {
+  constructor(
+    public override config: BaseConfig<ButtonCustomConfig>
+  ) {
+    super(config);
+  }
+
+  public handleClickEvent(id: string): void {
+    this.dependencyHandlerService.publishEvent(id ?? this.getUniqueRowId, id);
+  }
+
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value || [], this.validators);
+    return this.control;
+  }
+}
+
+// File: accordion-tab.strategy.ts
+import {ControlStrategy} from "./control.strategy";
+import {AbstractControl, FormGroup} from "@angular/forms";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {AccordionTabCustomAttributes} from "../../../model/configs/custom-attributes/accordion-tab.config";
+import {ApiToCall} from "../../../model/request-model/api-to-call";
+import {DataInitializer} from "../../../utils/data-initializer";
+
+export class AccordionTabStrategy extends ControlStrategy {
+  private _childFormConfig: BaseConfig<any>[] = [];
+  set childFormConfig(value: BaseConfig<any>[]) { this._childFormConfig = value; }
+  get childFormConfig(): BaseConfig<any>[] { return this._childFormConfig; }
+
+  constructor(config: BaseConfig<AccordionTabCustomAttributes>) {
+    super(config);
+    this.createControl(null);
+  }
+
+  override createControl(value: any): AbstractControl {
+    this.control = new FormGroup(value || {}, this.validators);
+    return this.control;
+  }
+
+  override initializeField(): void {
+    const requests: ApiToCall[] = this.config?.customAttributes?.apiToCall?.map(item => new ApiToCall(item as ApiToCall).buildRequest(this.libraryConfig));
+
+    try {
+      this.communityService.makeRequests(requests).subscribe((result: any): void => {
+        this.childFormConfig = result[this.config.field]?[this.formConfigKey];
+        this.data = result["data"];
+        console.log("appended data???", this.data);
+
+        // TEMP: Demo Purpose
+        setTimeout(() => {
+          DataInitializer.initializeData(this.data, this.fieldRegistry, fieldId);
+        }, 10);
+      });
+    } catch (error) {
+      console.error("ERROR IN ICG ACCORDION TAB STRATEGY", error);
+    }
+  }
+
+  dataInitialized(): void {
+    // Initialized
+  }
+
+  createGroup(data: any, control: any): FormGroup {
+    // this.config?.customAttributes?.filterConfig?.forEach(config => {
+    //   const strategy = this.controlsFactory.getInstance().getStrategy(config);
+    //   if (!strategy) {
+    //     console.warn('Strategy ${config?.componentType} not found');
+    //     return;
+    //   }
+    //   control?.addControl(config.field, strategy.createControl(data?[config.field]));
+    //   strategy.formGroup = control;
+    // });
+    return control;
+  }
+
+  override patchValue(data: any[]): void {
+    (this.control as FormGroup).reset();
+    if (Array.isArray(data)) {
+      data?.forEach((item: any) => FormGroupCapable.createGroup(item, this.control));
+    }
+  }
+}
+
+// File: icg-accordion-tab.strategy.ts
+import {AccordionTabStrategy} from "./accordion-tab.strategy";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {AccordionTabCustomAttributes} from "../../../model/configs/custom-attributes/accordion-tab.config";
+
+export class IcgAccordionTabStrategy extends AccordionTabStrategy {
+  constructor(public override config: BaseConfig<AccordionTabCustomAttributes>) {
+    super(config);
+    this.createControl(null);
+  }
+
+  override dataInitialized(): void {
+  }
+
+  override createControl(value: any): AbstractControl {
+    this.control = new FormGroup(value || {}, this.validators);
+    return this.control;
+  }
+
+  override createGroup(data: any, control: any): FormGroup {
+    return control;
+  }
+}
+
+// File: grid-header.factory.ts
+import {IGenericGridHeaderStrategyFactory} from "./grid-generic-header.interface";
+import {BaseHeaderConfig} from "../../../model/configs/grid-header-config/base-header.config";
+import {GridHeaderControl} from "../../../grid-header-strategies/strategies/header/grid-header-control.strategy";
+import {StrategyRegisterConstant} from "../../../strategy-register.constant";
+import {GridHeaderType} from "../../../model/constants/enum";
+
+export class GridHeaderFactory implements IGenericGridHeaderStrategyFactory {
+  private static instance: IGenericGridHeaderStrategyFactory;
+  static strategyRegistry: { [key: string]: new (config: BaseHeaderConfig, fieldId: string) => GridHeaderControl } = {};
+
+  public static get getInstance(): IGenericGridHeaderStrategyFactory {
+    if (!GridHeaderFactory.instance) {
+      GridHeaderFactory.instance = new GridHeaderFactory();
+    }
+    return GridHeaderFactory.instance;
+  }
+
+  registerStrategy(strategyType: string, strategy: new (config: BaseHeaderConfig) => GridHeaderControl): void {
+    GridHeaderFactory.strategyRegistry[strategyType] = strategy;
+  }
+
+  getStrategy(config: BaseHeaderConfig): GridHeaderControl | null {
+    const action = config.componentType as GridHeaderType;
+    if (!action) throw new Error("Component type or Config not provided in Grid Header Factory");
+
+    const strategyMap = StrategyRegisterConstant.strategyHeaderConfigTypeMap[action];
+    
+    if (!strategyMap) {
+      console.error("Header action STRATEGY error: ", action);
+      return null;
+    }
+
+    const strategyType = strategyMap.strategyName;
+    const strategyClass = GridHeaderFactory.strategyRegistry[strategyType];
+    
+    if (!strategyClass) {
+      console.warn("Unable to get Header Strategy class: ${strategyType}");
+      return null;
+    }
+
+    const obj = new BaseHeaderConfig(config);
+    return new strategyClass(obj, action);
+  }
+}
+
+// File: grid-header-action.factory.ts
+import {IGenericGridActionStrategyFactory} from "./grid-generic-action.strategy";
+import {BaseHeaderActionConfig} from "../../../model/configs/grid-header-config/base-header.config";
+import {GridHeaderActionControl} from "../../../grid-header-strategies/strategies/header-actions/grid-header-action-control.strategy";
+import {StrategyRegisterConstant} from "../../../strategy-register.constant";
+import {GridActionType} from "../../../model/constants/enum";
+
+export class GridHeaderActionFactory implements IGenericGridActionStrategyFactory {
+  private static instance: IGenericGridActionStrategyFactory;
+  static strategyRegistry: { [key: string]: new (config: BaseHeaderActionConfig, actionId: string) => GridHeaderActionControl } = {};
+
+  public static get getInstance(): IGenericGridActionStrategyFactory {
+    if (!GridHeaderActionFactory.instance) {
+      GridHeaderActionFactory.instance = new GridHeaderActionFactory();
+    }
+    return GridHeaderActionFactory.instance;
+  }
+
+  registerStrategy(strategyType: string, strategy: new (config: BaseHeaderActionConfig, actionId: string) => GridHeaderActionControl): void {
+    GridHeaderActionFactory.strategyRegistry[strategyType] = strategy;
+  }
+
+  getStrategy(config: BaseHeaderActionConfig): GridHeaderActionControl | null {
+    const action = config.id.toUpperCase() as GridActionType;
+    
+    const strategyMap = StrategyRegisterConstant.strategyHeaderActionConfigTypeMap[action];
+    
+    if (!strategyMap) {
+      console.error("Header action STRATEGY error: ", action);
+      return null;
+    }
+
+    const strategyType = strategyMap.strategyName;
+    const strategyClass = GridHeaderActionFactory.strategyRegistry[strategyType];
+    
+    if (!strategyClass) {
+      console.warn("Unable to get Header Strategy class: ${strategyType}");
+      return null;
+    }
+
+    const obj = new BaseHeaderActionConfig(config);
+    return new strategyClass(obj, action);
+  }
+}
+
+// File: cia-common-ui.component.css
+.cc-item {
+  width: 60vw;
+}
+
+.flex-row {
+  box-sizing: border-box;
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-flex: 0;
+  -ms-flex: 0 1 auto;
+  flex: 0 1 auto;
+  -webkit-box-orient: horizontal;
+  -webkit-box-direction: normal;
+  -ms-flex-direction: row;
+  flex-direction: row;
+  -ms-flex-wrap: wrap;
+  flex-wrap: wrap;
+  margin-right: -.5rem;
+  margin-left: -.5rem
+}
+
+.flex-wrap-div-div {
+  margin-right: 5em;
+  margin-bottom: 5px;
+  min-width: 16vw;
+}
+
+.textarea {
+  width: 100%;
+}
+
+.cc-def {
+  color: #008ce6;
+}
+
+/*
+:ng-deep app-auto-complete-tag.ng-invalid div.add-error .input-height:not(:disabled).p-autocomplete .p-autocomplete-multiple-container .p-autocomplete-input-token {
+:ng-deep app-auto-complete-tag.ng-invalid div.add-error .input-height:not(:disabled).p-autocomplete .p-autocomplete-multiple-container {
+border-color: #dc3545 !important;
+}
+*/
+
+.required-field::before {
+  content: "*";
+  color: red;
+}
+
+:host :ng-deep .p-autocomplete .p-autocomplete-multiple-container .p-autocomplete-input-token {
+  padding: unset !important;
+}
+
+:host :ng-deep body .p-autocomplete ul.p-autocomplete-multiple-container .p-autocomplete-token {
+  margin: unset !important;
+}
+
+:host :ng-deep .p-autocomplete-multiple-container {
+  border-right: unset !important;
+}
+
+:host :ng-deep .multiple .p-autocomplete .p-button {
+  height: 2.1rem !important;
+}
+
+:host :ng-deep .p-autocomplete .p-button {
+  position: relative;
+  right: 5px;
+}
+
+.read-only-fld {
+  background-color: var(--disabled-fld-bg) !important;
+}
+
+.align-right {
+  text-align: right !important;
+}
+
+:ng-deep .display-flex {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+// IJsonAdapter Interface (Image 1)
+import {AbstractJsonMapper} from "./abstract-jsonmapper";
+
+export interface IJsonAdapter {
+  key: string;
+  adapter: AbstractJsonMapper;
+}
+
+// IBehaviorStrategyFactory Interface (Image 2)
+import {IFieldBehaviorStrategy} from "./IFieldBehaviorStrategy";
+
+export interface IBehaviorStrategyFactory {
+  getStrategy(dependedFunction: string): IFieldBehaviorStrategy;
+  addBehaviorStrategies(behaviorStrategies: {[key: string]: IFieldBehaviorStrategy}): void;
+}
+
+// IConditionStrategy Interface (Image 3)
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {DependencyConfig} from "../model/configs/dependency.config";
+
+export interface IConditionStrategy {
+  init(dependsOnField: IGenericStrategyInterface, dependency?: DependencyConfig<any>, data?: any): boolean;
+}
+
+// IConditionStrategyFactory Interface (Image 4)
+import {IConditionStrategy} from "./IConditionStrategy";
+
+export interface IConditionStrategyFactory {
+  getStrategy(dependedFunction: string): IConditionStrategy | undefined;
+  addConditionStrategies(conditionStrategies: {[key: string]: IConditionStrategy}): void;
+}
+
+// IFieldBehaviorStrategy Interface (Image 5)
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {IJsonAdapterService} from "../json-adapter-factory.interface";
+import type {ICommonReference} from "../services/interfaces/common-reference";
+
+export interface IFieldBehaviorStrategy {
+  dataAdapter?: IJsonAdapterService;
+  commonReferenceService?: ICommonReference;
+  apply(field: IGenericStrategyInterface, dependency: DependencyConfig<any>, data: any, behavior?: any): void;
+}
+
+// IJsonAdapter Interface (Image 6)
+import {OperationType} from "../model/enums/operation-type.enum";
+
+export interface IJsonAdapter {
+  transform(data: any): any;
+}
+
+// IJsonAdapterService Interface (Image 7)
+import {JsonAdapter} from "./dep-json-adapter.model";
+import {IJsonAdapter} from "./json-adapter.interface";
+
+export interface IJsonAdapterService {
+  registerJsonAdapter(adapter: JsonAdapter): void;
+  registerJsonAdapters(adapters: JsonAdapter[]): void;
+  getAdapterByKey(key: string): IJsonAdapter | undefined;
+  getAdapters(): Map<string, IJsonAdapter>;
+  printAdapters(): void;
+}
+
+// DependencyAdapterFactoryService (Image 8)
+import { Injectable } from '@angular/core';
+import {IJsonAdapterService} from "../interfaces/json-adapter.interface";
+import {JsonAdapter} from "../interfaces/dep-json-adapter.model";
+import {IJsonAdapter} from "../interfaces/json-adapter-factory.interface";
+import {AbstractJsonMapper} from "../interfaces/abstract-jsonmapper";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DependencyAdapterFactoryService implements IJsonAdapterService {
+  private adapters: Map<string, AbstractJsonMapper> = new Map<string, AbstractJsonMapper>();
+  
+  // register json adapters
+  registerJsonAdapter(adapter: JsonAdapter): void {
+    if (this.adapters.has(adapter.key)) {
+      console.warn(`Duplicate Adapter key: ${adapter.key}. Choose a different Adapter key!`);
+      return;
+    }
+    this.adapters.set(adapter.key, adapter.adapter);
+  }
+  
+  registerJsonAdapters(adapters: JsonAdapter[]): void {
+    adapters.forEach(adapter => this.registerJsonAdapter(adapter));
+  }
+  
+  getAdapterByKey(key: string): AbstractJsonMapper | undefined {
+    return this.adapters.get(key);
+  }
+  
+  getAdapters(): Map<string, AbstractJsonMapper> {
+    return this.adapters;
+  }
+  
+  printAdapters(): void {
+    console.log("Registered Adapters", this.adapters);
+  }
+}
+
+// DependencyHandlerService (Images 9-10)
+import { Injectable } from '@angular/core';
+import {Behavior, DependencyBaseCustomAttributes, DependencyConfig} from "../model/configs/dependency.config";
+import {IDependencyHandler} from "../services/interfaces/dependency-handler";
+import {EventBusService} from "../services/infrastructure/event-bus.service";
+import {FieldRegistryService} from "../services/infrastructure/field-registry.service";
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {IConditionStrategyFactory} from "./factory/condition-strategy.factory";
+import {ConditionStrategyFactory} from "./factory/condition-strategy.factory";
+import {mapHashObjectStructure} from "../utils";
+import {HashObject} from "../utils/hash-objects";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DependencyHandlerService implements IDependencyHandler {
+  dependencyMap: Map<string, Set<IGenericStrategyInterface>> = new Map<string, Set<IGenericStrategyInterface>>();
+  hashDependencyMap: Map<string, Set<string>> = new Map<string, Set<string>>();
+  hashObject: HashObject = new HashObject();
+  private _dependencyQueue: Map<IGenericStrategyInterface, DependencyConfig<any>[]> = new Map<IGenericStrategyInterface, DependencyConfig<any>[]>();
+  
+  constructor(
+    private eventBusService: EventBusService,
+    private fieldRegistryService: FieldRegistryService,
+    private conditionStrategyFactory: ConditionStrategyFactory
+  ) {}
+  
+  registerDependencies(dependent: IGenericStrategyInterface, dependencyConfigs: DependencyConfig<any>[]): void {
+    dependencyConfigs.forEach(config => this.registerDependency(dependent, config));
+  }
+  
+  async registerDependency(dependent: IGenericStrategyInterface, dep: DependencyConfig<any>): Promise<void> {
+    const trigger = this.fieldRegistryService.get(dep.dependsOnField);
+    const dependsOnField = trigger?.rowId ? `${trigger.getUniqueRowId}` : dep.dependsOnField;
+    
+    const hash = await this.hashObject.hashObject(dependent);
+    
+    if (!this.dependencyMap.has(dependsOnField)) {
+      this.dependencyMap.set(dependsOnField, new Set());
+    }
+    
+    if (!this.hashDependencyMap.has(dependsOnField)) {
+      this.hashDependencyMap.set(dependsOnField, new Set());
+    }
+    
+    const dependencySet: Set<IGenericStrategyInterface> = this.dependencyMap.get(dependsOnField)!;
+    const hashDependencySet: Set<string> = this.hashDependencyMap.get(dependsOnField)!;
+    
+    if (!hashDependencySet.has(hash)) {
+      dependencySet.add(dependent);
+      hashDependencySet.add(hash);
+    }
+    
+    this.dependencyMap.get(dependsOnField)!.add(dependent);
+    this._dependencyQueue.get(dependent)?.add(dependsOnField, dep);
+    this.subscribeToEvents(dependent, trigger, dependsOnField, dep);
+  }
+  
+  subscribeToEvents(dependent: IGenericStrategyInterface, trigger: IGenericStrategyInterface, dependsOnField: string, dep: DependencyConfig<any>): void {
+    const eventName = `${dependent}.${dependsOnField}`;
+    this.eventBusService.subscribe(eventName, (data:any) => this.handleCondition(dependent, trigger, dep, data), dep);
+  }
+  
+  private handleCondition(
+    dependent: IGenericStrategyInterface,
+    trigger: IGenericStrategyInterface,
+    config: DependencyConfig<DependencyBaseCustomAttributes>,
+    data: any): void {
+    
+    const dependsActionModifier = config.customAttributes?.dependsActionModifier ?? config.dependsAction;
+    const condition: IConditionStrategy | undefined = this.conditionStrategyFactory.getStrategy(dependsActionModifier);
+    
+    if (!condition) {
+      console.error(`NO Condition strategy for: ${dependsActionModifier} - please add it to ConditionStrategyFactory`);
+      return;
+    }
+    
+    condition.init(trigger, config, data) 
+      ? config.behavior.forEach(behavior => this.handleBehavior(behavior, dependent, config, data))
+      : config.inverseBehavior?.forEach(behavior => this.handleBehavior(behavior, dependent, config, data));
+  }
+  
+  private handleBehavior(
+    behavior: string,
+    field: IGenericStrategyInterface,
+    dependency: DependencyConfig<any>,
+    data: any): void {
+    
+    field.applyBehavior(behavior, dependency, data);
+  }
+  
+  publishEvent(triggerName: string, data: any): void {
+    this.eventBusService.publish(triggerName, data);
+  }
+}
+
+// BehaviorBase abstract class (Image 12)
+import {IFieldBehaviorStrategy} from "../interfaces/IFieldBehaviorStrategy";
+import {DependencyAdapterFactoryService} from "../services/dependency-adapter-factory.service";
+import {IJsonAdapterService} from "../interfaces/json-adapter-factory.interface";
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {DependencyBaseCustomAttributes, DependencyConfig} from "../model/configs/dependency.config";
+import {InjectorService} from "../utils/decorators/injector-service.decorator";
+import {CommonReferenceService} from "../services/reference/common-reference.service";
+import type {ICommonReference} from "../services/interfaces/common-reference";
+
+export abstract class BehaviorBase implements IFieldBehaviorStrategy {
+  @InjectorService(DependencyAdapterFactoryService)
+  dataAdapter!: IJsonAdapterService;
+  
+  @InjectorService(CommonReferenceService)
+  commonReferenceService!: ICommonReference;
+  
+  abstract apply(field: IGenericStrategyInterface, dep: DependencyConfig<DependencyBaseCustomAttributes>, data: any, behavior?: any): void;
+}
+
+// DialogButtonConfirmBehavior (Image 13)
+import { DependencyConfig } from "../model/configs/dependency.config";
+import {BehaviorBase} from "./base.behavior";
+import {
+  DialogButtonConfirmConfig
+} from "../model/configs/dependency-custom-attributes/dialog-button-confirm.config";
+import {BaseButtonStrategy} from "../strategies/field-strategies/button-strategies/base-button.strategy";
+
+export class DialogButtonConfirmBehavior extends BehaviorBase {
+  override apply(field: any, dep: DependencyConfig<DialogButtonConfirmConfig>, data: any, behavior?: any): void {
+    if (dep.customAttributes?.dialogConfirmData) {
+      field.control.patchValue(field.customAttributes?.dialogConfirmData[dep.customAttributes?.dialogConfirmData]?.value);
+      field.component.outClick.emit(null);
+    } else {
+      field.component.outClick.emit(null);
+    }
+  }
+}
+
+// DialogOpenBehavior (Image 14)
+import DependencyConfig, DependencyBaseCustomAttributes } from "../model/configs/dependency.config";
+import type { IGenericStrategyInterface } from "../strategies/field-strategies/generic-strategy.interface";
+import {BehaviorBase} from "./base.behavior";
+import {InjectorService} from "../utils/decorators/injector-service.decorator";
+import {DynamicDialogService} from "../services/form/dynamic-dialog.service";
+import {IDialogService} from "../interfaces/dialog-service.interface";
+
+export class DialogOpenBehavior extends BehaviorBase {
+  @InjectorService(DynamicDialogService)
+  dialogService!: IDialogService;
+  
+  override async apply(field: IGenericStrategyInterface, dep: DependencyConfig<DependencyBaseCustomAttributes> | undefined, data: any): void {
+    const config = (field.config?.customAttributes as any);
+    if (!config) {
+      throw new Error("Dialog config missing in Dialog Open Behavior");
+    }
+    if (((config.customAttributes as any)?.dialogConfig) ?? (config.id === data)) {
+      throw new Error("Dialog config missing in Dialog Open Behavior");
+    }
+    
+    await this.dialogService.openDialog(config.dialogConfig, data);
+  }
+}
+
+// ModifyConfigBehavior (Image 15)
+import {BehaviorBase} from "./base.behavior";
+import {ControlStrategy} from "../strategies/field-strategies/control.strategy";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {ModifyValueCustomAttributes} from "../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+export class ModifyConfigBehavior extends BehaviorBase {
+  apply(field: ControlStrategy, dep: DependencyConfig<ModifyValueCustomAttributes>, data?: any, behavior?: any): void {
+    //TODO
+    const dependencyMap = {
+      op: 'HIDE', prop: 'isHidden', val: true },
+      { op: 'SHOW', prop: 'isHidden', val: false },
+      { op: 'ENABLE', prop: 'editable', val: true },
+      { op: 'DISABLE', prop: 'editable', val: false }
+    };
+    
+    const obj = dependencyMap.find(({op, prop}) => d.op == behavior);
+    if (obj && obj.prop) (field.config as any)[obj.prop] = obj.val;
+  }
+}
+
+// ModifyValidatorBehavior (Image 16)
+import { DependencyConfig } from "../model/configs/dependency.config";
+import {ValidatorRegistryService} from "../services/form/validator-registry.service";
+import {ControlStrategy} from "../strategies/field-strategies/control.strategy";
+import {InjectorService} from "../utils/decorators/injector-service.decorator";
+import {BehaviorBase} from "./base.behavior";
+import {
+  ModifyValueCustomAttributes
+} from "../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+export class ModifyValidatorBehavior extends BehaviorBase {
+  @InjectorService(ValidatorRegistryService)
+  protected validatorService!: ValidatorRegistryService;
+  
+  apply(field: any, dep: DependencyConfig<ModifyValueCustomAttributes>, data: any, behavior?: any): void {
+    if (dep && dep.validators) {
+      field.formGroup.get(field.id).setValidators(this.validatorService.getValidators(dep.validators));
+      field.formGroup.get(field.id).updateValueAndValidity();
+    }
+  }
+}
+
+// ModifyValueBehavior (Images 17-18)
+import { BehaviorBase } from "./base.behavior";
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {DataInitializer} from "../utils/data-initializer";
+import {InjectorService} from "../utils/decorators/injector-service.decorator";
+import {CommonHttpService} from "../services/utility/common-http.service";
+import {
+  ModifyValueCustomAttributes
+} from "../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+import {ApiToCall} from "../model/request-model/api-to-call";
+import {asyncScheduler, of} from "rxjs";
+import {flattenOneLevel} from "../utils";
+
+export class ModifyValueBehavior extends BehaviorBase { 1 inheritor
+  @InjectorService(CommonHttpService)
+  protected httpService!: CommonHttpService;
+  
+  apply(field: IGenericStrategyInterface, dep: DependencyConfig<ModifyValueCustomAttributes>, data: any): void { 1 override
+    if (dep && dep.customAttributes && dep.customAttributes.apiToCall) {
+      const fg = dep.customAttributes.rootId ? field.formGroup.get(dep.customAttributes.rootId) : field.formGroup;
+      //const config = dep.customAttributes.rootId ? field.formGroup.customAttributes.apiToCall.map((item: any) => new ApiToCall(item).buildBody(fg.value));
+      // const requests = dep.customAttributes.apiToCall.map((item: any) => {
+      //   this.httpService.request(req).subscribe((res: any) => {
+      //     this.httpService.updateData([{field.id}: res], field);
+      //   });
+      // });
+      // });
+      asyncScheduler.schedule(() => {
+        console.log("testing???", {...data, ...flattenOneLevel(field.formGroup.value) });
+        const requests = dep.customAttributes.apiToCall.map((item: any) => new ApiToCall(item).buildBody(fg.value)); //TODO - check how to implement
+        
+        requests.forEach((req: any) => {
+          this.httpService.request(req).subscribe((res: any) => {
+            DataInitializer.updateData([field.id], res, field);
+          });
+        });
+      });
+    } else {
+      DataInitializer.updateData([field.id], data, field);
+    }
+  }
+}
+
+// ResetValueBehavior (Image 19)
+import {BehaviorBase} from "./base.behavior";
+import {ControlStrategy} from "../strategies/field-strategies/control.strategy";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {ModifyValueCustomAttributes} from "../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+export class ResetValueBehavior extends BehaviorBase {
+  apply(field: ControlStrategy, dep: DependencyConfig<ModifyValueCustomAttributes>, data?: any): void {
+    DataInitializer.updateData([field.id], {}, field);
+  }
+}
+
+// TransformValueBehavior (Image 20)
+import {ModifyValueBehavior} from "./modify-value.behavior";
+import {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {
+  ModifyValueCustomAttributes
+} from "../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+export class TransformValueBehavior extends ModifyValueBehavior {
+  override apply(field: IGenericStrategyInterface, dep: DependencyConfig<ModifyValueCustomAttributes>, data: any): void {
+    //const newValue = this.transform(data, dep.customAttributes?.jsonAdapters ?? []);
+    //DataInitializer.updateData([field.id], newValue), field);
+  }
+  
+  private transformData(data: any, jsonAdapters: string[]): any {
+    let template: any;
+    
+    jsonAdapters.forEach((key: string) => {
+      const adapter = this.dataAdapter.getAdapterByKey(key);
+      if (!adapter) console.warn(`Adapter key ${key} not found`);
+      template = adapter?.transform(data) ?? data;
+    });
+    
+    return template;
+  }
+}
+
+// LinkRouterStrategy (Image 1)
+import {Injectable} from "@angular/core";
+import {Router} from "@angular/router";
+import {InjectorService} from "../../../utils/decorators/injector-service.decorator";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {RouteLinkConfig} from "../../../model/configs/custom-attributes/link-configs/route-link.config";
+
+export class LinkRouterStrategy extends BaseLink {
+  get navToParams(): string[] | null | undefined { return this.config?.customAttributes?.navToParams; }
+  get navTo(): string | null | undefined { return this.config?.customAttributes?.navTo; }
+  
+  @InjectorService(Router)
+  private router!: Router;
+  
+  constructor(
+    public override config: BaseConfig<RouteLinkConfig>,
+    fieldId: string) {
+    super(config, fieldId);
+  }
+  
+  public handleLinkClick(rowData: any): void {
+    let param = {};
+    this.navToParams?.forEach((element: string): void => {
+      (param as any)[element] = rowData;
+    });
+    this.router.navigate([this.navTo], {
+      queryParams: param
+    });
+  }
+}
+
+// SimpleLinkStrategy (Image 2)
+import {ComponentType} from "../../../model/config.enums";
+
+export class SimpleLinkStrategy extends BaseLink {
+  @InjectorService(DialogService)
+  private dialogService!: DialogService;
+  
+  @InjectorService(CommonRenderService)
+  private commonRenderService!: ICommonRenderService;
+  
+  constructor(
+    public override config: BaseConfig<SimpleLinkConfig>,
+    fieldId: string) {
+    super(config, fieldId);
+  }
+  
+  public async handleLinkClick(rowData: any): Promise<void> {
+    const dialog: Typeof<any> = await this.commonRenderService.getComponentByComponentType(ComponentType.ADVANCED_DIALOG);
+    if (!dialog) {
+      console.error("ADVANCED DIALOG IS NULL!", dialog);
+      return;
+    }
+    this.dialogService.open(
+      dialog,
+      header: this.config.displayName ?? this.config.columnName,
+      width: "60%",
+      data: {
+        data: of({[this.fieldId]: rowData[this.fieldId]}),
+        parentStrategy: this
+      }
+    );
+  }
+}
+
+// AdvancedDialogStrategy (Images 3 & 4)
+import {ControlStrategy} from "../control.strategy";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {AbstractControl, FormGroup} from "@angular/forms";
+import {ApiToCall} from "../../../model/request-model/api-to-call";
+import {DynamicDialogConfig} from "../../../model/configs/custom-attributes/dialog-configs/dynamic-dialog.config";
+import {InjectorService} from "../../../utils/decorators/injector-service.decorator";
+import {CommonHttpService} from "../../../services/utility/common-http.service";
+import {ICommonHttpService} from "../../../services/interfaces/common-http";
+import {checkPartialObjKey} from "../../../utils";
+import {ChangeDetectorRef} from "@angular/core";
+
+export class AdvancedDialogStrategy extends ControlStrategy {
+  get dialogConfig(): DialogConfig | undefined { return this.config?.customAttributes?.dialogConfig; }
+  
+  public formConfig: BaseConfig<any>[] = [];
+  public formData: any;
+  public formRefData!: any;
+  
+  public changeDetectorRef!: ChangeDetectorRef;
+  
+  @InjectorService(CommonHttpService)
+  private httpCommonService!: ICommonHttpService;
+  
+  constructor(
+    public override config: BaseConfig<DynamicDialogConfig>
+  ) {
+    super(config);
+  }
+  
+  dataInitialized(): void {}
+  
+  createControl(value: any): AbstractControl {
+    this.control = new FormGroup({}, this.validators);
+    return this.control;
+  }
+  
+  initializeDialog(): void {
+    const requests: ApiToCall[] = this.dialogConfig?.apiToCall?.map((item: ApiToCall) => new ApiToCall(item as ApiToCall).buildRequestParams(this.libraryConfig));
+    this.httpCommonService.makeRequests(requests).subscribe((result: any) => {
+      this.formConfig = (result as any)[checkPartialObjKey(result, this.formConfigKey)] ?? [];
+      this.formData = result ?? {};
+      console.log("appended data???", this.data);
+      
+      // TEMP: Demo Purpose
+      setTimeout((): void => {
+        DataInitializer.initializeData(this.data, this.fieldRegistry.fields);
+      }, 10);
+    });
+  }
+}
+
+// BaseButtonStrategy (Image 5)
+import {ControlStrategy} from "../control.strategy";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {ButtonCustomConfig} from "../../../model/configs/custom-attributes/button.config";
+
+export abstract class BaseButtonStrategy extends ControlStrategy {
+  enabled: boolean = true;
+  
+  constructor(
+    config: BaseConfig<ButtonCustomConfig>
+  ) {
+    super(config);
+  }
+  
+  dataInitialized(): void {}
+  
+  public abstract handleClickEvent(param: any): void;
+  
+  override enable(): void {
+    this.enabled = true;
+  }
+  
+  override disable(): void {
+    this.enabled = false;
+  }
+  
+  override editable(): boolean {
+    return this.enabled;
+  }
+}
+
+// SimpleButtonStrategy (Image 6)
+import {BaseButtonStrategy} from "./base-button.strategy";
+import type {BaseConfig} from "../../../model/configs/base.config";
+import {ButtonCustomConfig} from "../../../model/configs/custom-attributes/button.config";
+import { AbstractControl, FormControl } from "@angular/forms";
+
+export class SimpleButtonStrategy extends BaseButtonStrategy {
+  constructor(
+    config: BaseConfig<ButtonCustomConfig>
+  ) {
+    super(config);
+  }
+  
+  public handleClickEvent(id: string): void {
+    this.dependencyHandlerService.publishEvent(id ? id : this.getUniqueRowId, id);
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormControl(value || [], this.validators);
+    return this.control;
+  }
+}
+
+// AccordionTabStrategy (Images 7 & 8)
+import { ControlStrategy } from "../control.strategy";
+import { AbstractControl, FormGroup } from "@angular/forms";
+import { AccordionTabCustomAttributes } from "../../../model/configs/custom-attributes/accordion-tab.config";
+import type { BaseConfig } from "../../../model/configs/base.config";
+import { ApiToCall } from "../../../model/request-model/api-to-call";
+import { DataInitializer } from "../../../utils/data-initializer";
+
+export class AccordionTabStrategy extends ControlStrategy {
+  private _childFormConfig: BaseConfig<any>[] = [];
+  set childFormConfig(value: BaseConfig<any>[]) { this._childFormConfig = value; }
+  get childFormConfig(): BaseConfig<any>[] { return this._childFormConfig; }
+  
+  constructor(config: BaseConfig<AccordionTabCustomAttributes>) {
+    super(config);
+    this.createControl(null);
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormGroup(value || [], this.validators);
+    return this.control;
+  }
+  
+  override initializeField(): void {
+    const requests: ApiToCall[] = this.config?.customAttributes?.apiToCall?.map(item => 
+      new ApiToCall(item as ApiToCall).buildRequestParams(this.libraryConfig));
+    
+    try {
+      this.commonHttpService.makeRequests(requests).subscribe((result: any) => {
+        this.childFormConfig = result[`${this.config.field}${this.formConfigKey}`] ?? [];
+        this.data = result[`${this.config.field}${this.dataKey}`];
+        console.log("appended data???", this.data);
+        
+        // TEMP: Demo Purpose
+        setTimeout((): void => {
+          DataInitializer.initializeData(this.data, this.fieldRegistry.fields);
+        }, 10);
+      });
+    } catch (error) {
+      console.error("ERROR IN ICG ACCORDION TAB STRATEGY", error);
+    }
+  }
+  
+  dataInitialized(): void {
+    // Initialized
+  }
+  
+  createGroup(data: any, control: any): FormGroup {
+    // this.config?.customAttributes?.filterConfig?.forEach(config => {
+    //   const strategy = ControlFactory.getInstance.getStrategy(config);
+    //   if (!strategy) {
+    //     console.warn(`Strategy ${config.componentType} not found`);
+    //     return;
+    //   }
+    //   control?.addControl(config.field, strategy.createControl(data[config.field]));
+    //   strategy.formGroup = control;
+    // });
+    
+    return control;
+  }
+  
+  override patchValue(data: any[]): void {
+    (this.control as FormGroup).reset();
+    if (Array.isArray(data)) {
+      data?.forEach((item: any) => this.createGroup(item, this.control));
+    }
+  }
+}
+
+// ICGAccordionTabStrategy (Image 9)
+import {AbstractControl, FormGroup} from "@angular/forms";
+import {BaseConfig} from "../../../model/configs/base.config";
+import {AccordionTabCustomAttributes} from "../../../model/configs/custom-attributes/accordion-tab.config";
+import {AccordionTabStrategy} from "./accordion-tab-strategy";
+import {ApiToCall} from "../../../model/request-model/api-to-call";
+
+export class IcgAccordionTabStrategy extends AccordionTabStrategy {
+  constructor(public override config: BaseConfig<AccordionTabCustomAttributes>) {
+    super(config);
+    this.createControl(null);
+  }
+  
+  override dataInitialized(): void {
+  }
+  
+  override createControl(value: any): AbstractControl {
+    this.control = new FormGroup(value || [], this.validators);
+    return this.control;
+  }
+  
+  override createGroup(data: any, control: any): FormGroup {
+    return control;
+  }
+}
+
+// IGenericGridHeaderStrategyFactory Interface (Images 10 & 11)
+import {IGridHeaderControl} from "../../../grid-header-strategies/strategies/header/grid-header-control.interface";
+import {BaseHeaderConfig} from "../../../model/configs/grid-header-config/base-header.config";
+
+export interface IGenericGridHeaderStrategyFactory {
+  registerStrategy(strategyType: string, strategy: new (config: BaseHeaderConfig, fieldId: string): IGridHeaderControl ): void;
+  getStrategy(config: Partial<BaseHeaderConfig>): IGridHeaderControl | null;
+}
+
+// GridHeaderFactory (Images 12, 13, 14 & 15)
+import { BaseHeaderActionConfig } from "../../../model/configs/grid-header-config/base-header-actions/grid-header-action-control.strategy";
+import { IGenericGridActionStrategyFactory } from "../grid-generic-action.strategy";
+import { StrategyRegisterConstant } from "../../../strategy-register.constant";
+import {
+  GridHeaderActionControl
+} from "../../../grid-header-strategies/strategies/header-actions/grid-header-action-control.strategy";
+import { GridActionType } from "../../../model/config.enums";
+
+export class GridHeaderActionFactory implements IGenericGridActionStrategyFactory {
+  private static instance: IGenericGridActionStrategyFactory;
+  static strategyRegistry: { [key: string]: new (config: BaseHeaderActionConfig, actionId: string): GridHeaderActionControl };
+
+  public static get getInstance(): IGenericGridActionStrategyFactory {
+    if (!GridHeaderActionFactory.instance) {
+      GridHeaderActionFactory.instance = new GridHeaderActionFactory();
+    }
+    return GridHeaderActionFactory.instance;
+  }
+
+  registerStrategy(strategyType: string, strategy: new (config: BaseHeaderActionConfig) => GridHeaderActionControl): void {
+    GridHeaderActionFactory.strategyRegistry[strategyType] = strategy;
+  }
+
+  getStrategy(config: BaseHeaderActionConfig): GridHeaderActionControl | null {
+    const action = config.id.toUpperCase() as GridActionType;
+    if (!action) throw new Error("Component type or Config not provided in Grid Header Factory");
+    
+    const strategyMap: {[strategyName: string]: any} = StrategyRegisterConstant.strategyHeaderActionConfigTypeMap[action];
+    if (!strategyMap) {
+      console.error("Header action STRATEGY error: ", action);
+      return null;
+    }
+    
+    const strategyType: string = strategyMap.strategyName;
+    const strategyClass = GridHeaderActionFactory.strategyRegistry[strategyType];
+    if (!strategyClass) {
+      console.warn("Unable to get Header Strategy class: ${strategyType}");
+      return null;
+    }
+    
+    const obj = new BaseHeaderActionConfig(config);
+    return new strategyClass(obj, action);
+  }
+}
+
+/* CSS Styles (Images 1-4) */
+.cc-item {
+  width: 60vw;
+}
+
+.flex-row {
+  box-sizing: border-box;
+  display: -webkit-box;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-flex: 0;
+  -ms-flex: 0 1 auto;
+  flex: 0 1 auto;
+  -webkit-box-orient: horizontal;
+  -webkit-box-direction: normal;
+  -ms-flex-direction: row;
+  flex-direction: row;
+  -ms-flex-wrap: wrap;
+  flex-wrap: wrap;
+  margin-right: -.5rem;
+  margin-left: -.5rem
+}
+
+.flex-wrap-div-div {
+  margin-right: 5em;
+  margin-bottom: 5px;
+  min-width: 16vw;
+}
+
+textarea {
+  width: 100%;
+}
+
+.cc-def {
+  color: #008ce6;
+}
+
+/* CSS Continued with nested selectors (Images 3-4) */
+:ng-deep app-auto-complete-tag.ng-invalid div.add-error .input-height:not(:disabled).p-autocomplete .p-autocomplete-multiple-container,
+:ng-deep app-auto-complete-tag.ng-invalid div.add-error .input-height:not(:disabled).p-autocomplete .p-autocomplete-input {
+  border-color: #dc3545 !important;
+}
+
+.required-field::before {
+  content: "*";
+  color: red;
+}
+
+:host :ng-deep .p-autocomplete .p-autocomplete-multiple-container .p-autocomplete-input-token {
+  padding: unset !important;
+}
+
+:host :ng-deep body .p-autocomplete ul.p-autocomplete-multiple-container .p-autocomplete-token {
+  margin: unset !important;
+}
+
+:host :ng-deep .p-autocomplete-multiple-container {
+  border-right: unset !important;
+}
+
+:host :ng-deep .multiple .p-autocomplete .p-button {
+  height: 2.1rem !important;
+}
+
+:host :ng-deep .p-autocomplete .p-button {
+  position: relative;
+  right: 5px;
+}
+
+.read-only-fld {
+  background-color: var(--disabled-fg-bp) !important;
+}
+
+.align-right {
+  text-align: right !important;
+}
+
+:ng-deep .display-flex {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+
+/* Angular HTML Template (Image 5) */
+/*
+<div class="common-container p-2 m-2">
+  <form [formGroup]="formGroup">
+    <div>
+      <div>
+        <!-- indicator svg -->
+        <!-- [isLoading]="true" -->
+      </div>
+      <div 
+        componentRenderer class="row"
+        [libConfig]="libConfig"
+        [parentForm]="parentForm"
+        [formConfig]="formConfig"
+        [data]="data"
+        (outForm)="handleOutForm($event)"
+        (gridAction)="handleGridAction($event)"
+        (onClick)="handleButtonClick($event)"><!-- Rendering Form Components -->
+      </div>
+      <div *ngIf="fields?.size as loaders"></div>
+    </div>
+  </form>
+</div>
+*/
+
+
+// CiaCommonUIComponent (Images 6-9)
+@Component({
+  selector: 'cia-cia-common-ui',
+  templateUrl: './cia-common-ui.component.html',
+  styleUrls: ['./cia-common-ui.component.css'],
+  providers: [
+    FieldRegistryService,
+    LibraryConfigService
+  ]
+})
+export class CiaCommonUIComponent implements OnInit {
+  private _libConfig!: LibraryConfig;
+  get libConfig(): LibraryConfig { return this._libConfig; }
+  @Input() set libConfig(value: LibraryConfig) {
+    this._libConfig = value;
+    if (this._libConfig) {
+      this.fetchFormConfig();
+    }
+  }
+
+  private _parentForm!: FormGroup;
+  get parentForm(): FormGroup { return this._parentForm; }
+  @Input() set parentForm(value: FormGroup) {
+    this._parentForm = value;
+  }
+
+  private _formConfig: BaseConfig<any>[] = [];
+  get formConfig(): GenericStrategyInterface[] { return this.fieldRegistry.fields; }
+  get formGroup(): FormGroup<any> { return this.commonFormService.formGroup; }
+  @Input() set formConfig(value: any[]) {
+    this._formConfig = value;
+  }
+
+  private _data: any;
+  get data(): any { return this._data; }
+  @Input() set data(value: any) {
+    if (value) return;
+    this._data = value;
+  }
+
+  @Input() set refData(value: any) {
+    if (value) return;
+    this.initializeRefData(value);
+  }
+
+  private async initializeRefData(value: any): Promise<void> {
+    await this.commonRefService.initialize(value);
+  }
+
+  editable: boolean = false;
+  @Input() set edit(value: any) {
+    if (value != this.editable && value) {
+      this.editable = value;
+      this.updateFormState(value);
+    }
+  }
+
+  @Output() outFormConfig: EventEmitter<any>[] = new EventEmitter();
+  @Output() outData: EventEmitter<any> = new EventEmitter();
+  @Output() onClick: EventEmitter<any> = new EventEmitter();
+  @Output() gridAction: EventEmitter<{field: IGenericStrategyInterface, action: string, data: any, formGroup: FormGroup}> = new EventEmitter();
+
+  constructor(
+    public commonRefService: CommonReferenceService,
+    public fieldRegistry: FieldRegistryService,
+    public commonHttp: CommonHttpService,
+    private commonFacade: CommonFacadeService
+  ) {}
+
+  //region public methods
+  ngOnInit(): void {
+    this.formGroup?.valueChanges.pipe(
+      //takeUntil(this.onDestroy),
+      skip(1), debounceTime(200)).subscribe(() => {
+        this.outForm.emit(this.formGroup.getRawValue());
+      });
+  }
+
+  fetchFormConfig(): void {
+    const apiToCall: ApiToCall = {
+      key: this.libConfig.entityType,
+      context: this.libConfig.context,
+      endpoint: this.libConfig.endPoint,
+      method: Method.GET,
+      params: [ 7, "elements" ],
+      module: this.libConfig.subModuleName,
+      requestType: "DEFAULT",
+      options: {body: null, params: null, headers: null},
+      jsonAdapter: []
+    } as ApiToCall;
+    
+    const api = new ApiToCall(apiToCallObj).buildBody(this.libConfig);
+    this.commonHttp.makeRequests([api]).subscribe((result: any) => {
+      this.formConfig = result[apiToCallObj.key];
+      this.outFormConfig.emit(this.formConfig);
+    });
+  }
+
+  handleOutForm(e: any) {
+    this.outForm.emit(e);
+  }
+
+  handleButtonClick(e: any) {
+    this.onClick.emit(e);
+  }
+
+  handleGridAction(e: any) {
+    this.gridAction.emit(e);
+  }
+
+  //region private methods
+  private updateFormState(state: boolean) {
+    state ? this.formGroup?.enable() : this.formGroup?.disable();
+    this.fields.forEach(item => state ? item.enable() : item.disable());
+  }
+  //endregion
+}
+
+// NgModule Declarations (Images 11-12)
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import {FormsModule, ReactiveFormsModule} from "@angular/forms";
+import {CiaCommonUIComponent} from "./cia-common-ui.component";
+import {TableCellRendererDirective} from "../directives/component-render/table-directives/table-cell-renderer.directive";
+import {ComponentRendererDirective} from "../directives/component-render/component-renderer.directive";
+import {ChildComponentRendererDirective} from "../directives/component-render/child-component-renderer.directive";
+import {CommonLibRendererDirective} from "../directives/component-render/common-lib-renderer.directive";
+import {ComponentLoaderComponent} from "../components/shared/component-loader.component";
+import {
+  TableHeaderRendererDirective
+} from "../directives/component-render/table-directives/table-header-renderer.directive";
+import { MtLoaderModule } from "@citi-icg-172888/ng-icgds/loader";
+import {
+  TableFilterRendererDirective
+} from "../directives/component-render/table-directives/table-filter-renderer.directive";
+
+@NgModule({
+  declarations: [
+    ComponentRendererDirective,
+    ChildComponentRendererDirective,
+    TableCellRendererDirective,
+    CommonLibRendererDirective,
+    ComponentLoaderComponent,
+    TableHeaderRendererDirective,
+    TableFilterRendererDirective,
+    CiaCommonUIComponent
+  ],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    MtLoaderModule
+  ],
+  exports: [
+    ComponentRendererDirective,
+    ChildComponentRendererDirective,
+    TableCellRendererDirective,
+    CommonLibRendererDirective,
+    ComponentLoaderComponent,
+    TableHeaderRendererDirective,
+    TableFilterRendererDirective,
+    CiaCommonUIComponent
+  ]
+})
+export class SharedBaseModule { }
+
+// CommonFormService (Images 13-14)
+import { Injectable } from '@angular/core';
+import { AbstractControl, FormBuilder, FormControl, FormGroup } from '@angular/forms';
+import {ICommonForm} from "../interfaces/form-service.interface";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class CommonFormService implements ICommonForm {
+  _formGroup: FormGroup = new FormGroup({});
+  get formGroup(): FormGroup { return this._formGroup; }
+  set formGroup(value: FormGroup) { this._formGroup = value; }
+
+  private _formGroups : {[name: string]: AbstractControl} = {};
+  
+  constructor(private formBuilder: FormBuilder) {
+    this._formGroup = formBuilder.group({});
+  }
+  
+  resetFormGroup(): void {
+    this._formGroup = new FormGroup({});
+  }
+  
+  //TODO: Build out other methods
+  registerFormElement(fieldId: string, abstractControl: AbstractControl, parentForm: {fieldName: string, formGroup: FormGroup}) {
+    if (parentForm || (parentForm.formGroup == undefined)) {
+      this._formGroups[fieldId] = abstractControl;
+    } else {
+      this.addToParentForm(fieldId, abstractControl, parentForm);
+    }
+  }
+  
+  private addToParentForm(fieldId: string, abstractControl: AbstractControl, parentForm: {fieldName: string, formGroup: FormGroup}) {
+    if (abstractControl && this._formGroups[parentForm.fieldName] == undefined) {
+      this._formGroups[parentForm.fieldName] = parentForm.formGroup;
+    }
+    
+    (this._formGroups[parentForm.fieldName] as FormGroup).addControl(fieldId, abstractControl);
+  }
+  
+  patchFormValue(fieldId: string, value: any): void {
+    this.formGroup.get(fieldId)?.patchValue(value);
+  }
+  
+  getFormGroup(formId: string): AbstractControl<any> {
+    if (!formId) {
+      return this._formGroups[formId];
+    }
+    throw new Error(`cannot find ${formId} form group`);
+  }
+  
+  getAllFormGroups(): {[name: string]: AbstractControl} {
+    return this._formGroups;
+  }
+}
+
+// DynamicDialogService (Images 15-16)
+import { Injectable, Type } from '@angular/core';
+import {IDialogService} from "../interfaces/dialog-service.interface";
+import {DialogService, DynamicDialogRef} from "../model/configs/grid-header-config/base-header-action.config";
+import {LibraryConfigService} from "../infrastructure/library-config.service";
+import {LibraryConfig} from "../model/configs/library.config";
+import {CommonRenderService} from "../utility/common-render.service";
+import {ComponentType} from "../model/config.enums";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DynamicDialogService implements IDialogService {
+  private dialogRef!: DynamicDialogRef;
+  private _dialogConfig!: Partial<DialogConfig>;
+  
+  private get libConfig(): LibraryConfig { return this.libraryConfigService.libConfig; }
+  
+  constructor(
+    private dialogService: DialogService,
+    private libraryConfigService: LibraryConfigService,
+    private commonRenderService: CommonRenderService
+  ) {}
+  
+  async openDialog(dialogConfig: Partial<DialogConfig>, data: any): Promise<void> {
+    this._dialogConfig = dialogConfig;
+    const dialog: Type<any> = await this.getDialogComponent();
+    if (!dialog) {
+      throw new Error("ADVANCED DIALOG IS NULL!");
+    }
+    
+    this.dialogRef = this.dialogService.open(
+      dialog, {
+        header: this._dialogConfig.title,
+        width: "75%",
+        data: {
+          libraryConfig: this.libConfig,
+          data: data,
+          dialogConfig: this._dialogConfig
+        }
+      }
+    );
+  }
+  
+  async getDialogComponent(): Promise<Type<any>> {
+    const dialog: Type<any> = await this.commonRenderService.getComponentByComponentType(ComponentType.ADVANCED_DIALOG);
+    if (!dialog) {
+      throw new Error("ADVANCED DIALOG IS NULL!");
+    }
+    return dialog;
+  }
+}
+
+// FieldRegistryService (Images 17-18)
+import { Injectable } from '@angular/core';
+import type {IFieldRegistry} from "../interfaces/field-registry";
+import type {IGenericStrategyInterface} from "../strategies/field-strategies/generic-strategy.interface";
+import type {Subject} from "rxjs";
+import {AbstractControl, FormGroup} from "@angular/forms";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class FieldRegistryService implements IFieldRegistry {
+  _formGroup: FormGroup = new FormGroup({});
+  get formGroup(): FormGroup<any> { return this._formGroup; }
+  set formGroup(value: FormGroup<any>) { this._formGroup = value; }
+  
+  initializeData: Subject<any> = new Subject();
+  
+  private registry: Map<string, IGenericStrategyInterface> = new Map<string, IGenericStrategyInterface>();
+  
+  set fields(value: Map<string, IGenericStrategyInterface>) { this.registry = value; }
+  get fields(): Map<string, IGenericStrategyInterface> { return this.registry; }
+  
+  register(field: IGenericStrategyInterface): void {
+    this.registry.set(field.config.field, field);
+  }
+  
+  get(fieldName: string): IGenericStrategyInterface {
+    return this.registry.get(fieldName) as IGenericStrategyInterface;
+  }
+  
+  clearFields(): void {
+    this.registry.clear();
+  }
+  
+  addFormControl(fieldId: string, abstractControl: AbstractControl): FormGroup<any> {
+    if (abstractControl) this._formGroup?.addControl(fieldId, abstractControl);
+    return this.formGroup;
+  }
+  
+  addToParentForm(fieldId: string, abstractControl: AbstractControl, parentForm: FormGroup): FormGroup {
+    if (abstractControl) parentForm?.addControl(fieldId, abstractControl);
+    return parentForm;
+  }
+}
+
+// ValidatorRegistryService (Images 19-20)
+import { Injectable } from '@angular/core';
+import {ValidatorFn, Validators} from "@angular/forms";
+import {IValidatorRegistryService} from "../interfaces/validator-registry";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class ValidatorRegistryService implements IValidatorRegistryService {
+  private validatorMap: {[key: string]: ValidatorFn | ((param: any) => ValidatorFn)} = {
+    "VALIDATORS.REQUIRED": Validators.required,
+    "VALIDATORS.REQUIRED_TRUE": Validators.requiredTrue,
+    "VALIDATORS.EMAIL": Validators.email,
+    "VALIDATORS.NULL_VALIDATOR": Validators.nullValidator,
+    "VALIDATORS.MIN_LENGTH": (param: number) => Validators.minLength(param),
+    "VALIDATORS.MAX_LENGTH": (param: number) => Validators.maxLength(param),
+    "VALIDATORS.PATTERN": (param: string) => Validators.pattern(param)
+  };
+  
+  test(): void {
+    console.log("testing from register service");
+  }
+  
+  registerValidator(name: string, validatorFn: (param: any) => ValidatorFn): void {
+    if (this.validatorMap[name]) {
+      console.warn(`Validator: ${name} is already registered and will be overwritten.`);
+    }
+    
+    this.validatorMap[name] = validatorFn;
+  }
+  
+  getValidators(validators: string[]): ValidatorFn[] {
+    return (validators?.map(validatorStr => this.getValidator(validatorStr)) ?? []) as ValidatorFn[];
+  }
+  
+  private getValidator(validatorStr: string): ValidatorFn | null {
+    try {
+      if (this.validatorMap[validatorStr] && typeof this.validatorMap[validatorStr] === "function") {
+        return this.validatorMap[validatorStr] as ValidatorFn;
+      }
+      
+      const match: RegExpMatchArray | null = validatorStr.match(/^(VALIDATORS\.[^)]+)\(([^)]*)\)$/);
+      if (match) {
+        const [, fnName, param] = match;
+        const paramValue: string | number = isNaN(Number(param)) ? param : parseInt(param, 10);
+        
+        if (fnName in this.validatorMap && typeof this.validatorMap[fnName] === 'function') {
+          return (this.validatorMap[fnName] as (param: any) => ValidatorFn)(paramValue);
+        }
+      }
+    } catch (error) {
+      console.log("Invalid validator for ${validatorStr}", error);
+    }
+    
+    console.error(`ERROR: Unknown validator ${validatorStr}`);
+    return null;
+  }
+}
+
+// RadioButtonConfig (Image 1)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ICG_SIZE} from "../button.config";
+import {MtSize} from "@citi-icg-172888/ng-icgds";
+
+export class RadioButtonConfig extends BaseCustomAttributes {
+  name!: string;
+  
+  //icg config
+  size: MtSize = ICG_SIZE.MD;
+  
+  constructor(radioButtonConfig: RadioButtonConfig, baseConfig: BaseConfig<RadioButtonConfig>) {
+    super(radioButtonConfig, baseConfig);
+    Object.assign(this, radioButtonConfig);
+  }
+}
+
+// TruncatePipe (Image 3)
+import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({
+  name: 'truncate'
+})
+export class TruncatePipe implements PipeTransform {
+  transform(value: any, limit: number = 10, delimiter: string = '...'): any {
+    return (value && value.length > limit) ? value.substring(0, limit) + delimiter : value;
+  }
+}
+
+// DynamicDialogConfig (Image 4)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {IDialogConfig} from "../grid-header-config/base-header-action.config";
+
+export class DynamicDialogConfig extends BaseCustomAttributes {
+  dialogConfig!: IDialogConfig;
+  
+  constructor(dynamicDialogConfig: DynamicDialogConfig, baseConfig: BaseConfig<any>) {
+    super(dynamicDialogConfig, baseConfig);
+    Object.assign(this, dynamicDialogConfig);
+  }
+}
+
+// ComplexLinkConfig (Image 5)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ValidateConfig} from "../../../utils/decorators/validate-config.decorator";
+import {IDialogConfig} from "../grid-header-config/base-header-action.config";
+
+@ValidateConfig
+export class ComplexLinkConfig extends BaseCustomAttributes {
+  buttonConfig: Array<{id: string, name: string, alwaysEditable: boolean, className: string}> = [];
+  dialogConfig!: Partial<IDialogConfig>;
+  
+  constructor(complexLinkConfig: ComplexLinkConfig, baseConfig: BaseConfig<any>) {
+    super(complexLinkConfig, baseConfig);
+    Object.assign(this, complexLinkConfig);
+  }
+}
+
+// ExternalLinkConfig (Image 6)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ValidateConfig} from "../../../utils/decorators/validate-config.decorator";
+
+@ValidateConfig
+export class ExternalLinkConfig extends BaseCustomAttributes {
+  navTo: string | null = null;
+  navToParams: string[] | null = null;
+  portalInfo: {requestEndpoint: string, responseDomain: string, requestType: string, rid: string} | null = null;
+  
+  constructor(externalLinkConfig: ExternalLinkConfig, baseConfig: BaseConfig<any>) {
+    super(externalLinkConfig, baseConfig);
+    Object.assign(this, externalLinkConfig);
+  }
+}
+
+// RouteLinkConfig (Image 7)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ValidateConfig} from "../../../utils/decorators/validate-config.decorator";
+
+@ValidateConfig
+export class RouteLinkConfig extends BaseCustomAttributes {
+  navToParams: string[] | null = null;
+  navTo: string | null = null;
+  
+  constructor(routeLinkConfig: RouteLinkConfig, baseConfig: BaseConfig<any>) {
+    super(routeLinkConfig, baseConfig);
+    Object.assign(this, routeLinkConfig);
+  }
+}
+
+// SimpleLinkConfig (Image 8)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ValidateConfig} from "../../../utils/decorators/validate-config.decorator";
+
+@ValidateConfig
+export class SimpleLinkConfig extends BaseCustomAttributes {
+  constructor(simpleLinkConfig: SimpleLinkConfig, baseConfig: BaseConfig<any>) {
+    super(simpleLinkConfig, baseConfig);
+    Object.assign(this, simpleLinkConfig);
+  }
+}
+
+// ComplexTreeDropdownConfig (Image 9)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ApiToCall} from "../../../model/request-model/api-to-call";
+
+export class ComplexTreeDropdownConfig extends BaseCustomAttributes {
+  buttonLabel!: string;
+  selectionMode!: SelectionMode;
+  allowDuplicatesWithInTree!: boolean;
+  includeChildNodes!: boolean;
+  key: string = "data";
+  labelKey: string = "label";
+  propagateSelectionDown: boolean = false;
+  propagateSelectionUp: boolean = false;
+  lazyLoader: boolean = false;
+  hierarchyType!: string;
+  treeKeyData: boolean = false;
+  
+  constructor(complexTreeConfig: ComplexTreeDropdownConfig, baseConfig: BaseConfig<any>) {
+    super(complexTreeConfig, baseConfig);
+    Object.assign(this, complexTreeConfig);
+  }
+}
+
+export enum SelectionMode {
+  SINGLE = "SINGLE",
+  MULTIPLE = "MULTIPLE"
+}
+
+// SimpleTreeDropdownConfig (Image 10)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+
+export class SimpleTreeDropdownConfig extends BaseCustomAttributes {
+  constructor(simpleTreeConfig: SimpleTreeDropdownConfig, baseConfig: BaseConfig<any>) {
+    super(simpleTreeConfig, baseConfig);
+    Object.assign(this, simpleTreeConfig);
+  }
+}
+
+// AccordionTabCustomAttributes (Image 11)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {DependencyConfig} from "../dependency.config";
+import {ApiToCall} from "../../../request-model/api-to-call";
+import {SIZE} from "../config.enums";
+
+export class AccordionTabCustomAttributes extends BaseCustomAttributes {
+  size: SIZE | null = null;
+  isOpen: boolean = false;
+  
+  constructor(accordionTabCustomAttributes: AccordionTabCustomAttributes, baseConfig: BaseConfig<AccordionTabCustomAttributes>) {
+    super(accordionTabCustomAttributes, baseConfig);
+    Object.assign(this, accordionTabCustomAttributes);
+  }
+}
+
+export class AccordionTab {
+  key: string | undefined;
+  displayName: string | undefined;
+  apiToCall: Array<ApiToCall> | undefined;
+}
+
+export class Configuration {
+  field!: string
+  displayName!: string
+  width!: any
+  isHidden!: boolean
+  className!: string
+  validators!: Array<string>
+  editable!: boolean
+  dependency!: DependencyConfig<any>[]
+  componentType!: string
+  enableTrackChange!: boolean
+  trackChangeConfig!: boolean
+  customAttributes!: Partial<BaseCustomAttributes>
+}
+
+// ButtonCustomConfig (Images 12-13)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {IDialogConfig} from "../grid-header-config/base-header-action.config";
+
+export class ButtonCustomConfig extends BaseCustomAttributes {
+  label!: string;
+  className: string = "";
+  styles!: string = "";
+  dialogConfig!: IDialogConfig[];
+  icon: string = "";
+  showOverlayOnClick: boolean = false;
+  overlayItems: Array<OverlayItem> = [];
+  
+  //icg styles
+  showIcon: boolean = false;
+  isBlock: boolean = false;
+  size: ICG_SIZE | null = null;
+  buttonType: ICG_BUTTON_TYPE | null = ICG_BUTTON_TYPE.PRIMARY;
+  
+  constructor(buttonCustomAttributes: ButtonCustomConfig, baseConfig: BaseConfig<any>) {
+    super(buttonCustomAttributes, baseConfig);
+    Object.assign(this, buttonCustomAttributes);
+  }
+}
+
+export enum ICG_BUTTON_TYPE {
+  PRIMARY = "primary",
+  OUTLINE = "outline",
+  GHOST = "ghost",
+  LINK = "link"
+}
+
+export enum ICG_SIZE {
+  LG = "lg",
+  MD = "md",
+  SM = "sm"
+}
+
+export interface OverlayItem {
+  id: string;
+  label: string;
+}
+
+// CalendarConfig (Image 14)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+
+export class CalendarConfig extends BaseCustomAttributes {
+  maxDate: string | null = null;
+  
+  constructor(calendarConfig: CalendarConfig, baseConfig: BaseConfig<CalendarConfig>) {
+    super(calendarConfig, baseConfig);
+    Object.assign(this, calendarConfig);
+  }
+}
+
+// CheckboxConfig (Image 15)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+
+export class CheckboxConfig extends BaseCustomAttributes {
+  constructor(checkboxConfig: CheckboxConfig, baseConfig: BaseConfig<CheckboxConfig>) {
+    super(checkboxConfig, baseConfig);
+    Object.assign(this, checkboxConfig);
+  }
+}
+
+// GeoCustomAttributes (Image 16)
+import {BaseCustomAttributes} from "../base.config";
+
+export class GeoCustomAttributes extends BaseCustomAttributes {
+  override refGroupId: string;
+  referenceKeyId: string;
+  isTopDown!: boolean;
+  shouldFilterTopLabels!: boolean;
+  selectionMode!: string;
+  applyValidation!: boolean;
+  allowForPublishedUpdate!: boolean;
+}
+
+// GridCustomAttributes and GridConfig (Images 17-19)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {DependencyConfig} from "../dependency.config";
+import {ValidateConfig} from "../../../utils/decorators/validate-config.decorator";
+import {IGenericStrategyInterface} from "../../../strategies/field-strategies/generic-strategy.interface";
+import {BaseHeaderConfig} from "../grid-header-config/base-header.config";
+
+@ValidateConfig
+export class GridCustomAttributes extends BaseCustomAttributes {
+  uniqueIdKey: string | null = null;
+  headerConfig: Partial<BaseHeaderConfig> | null = null;
+  config: GridConfig | null = null;
+  pageSize: number | null = 10;
+  pageIndex: string | null = "1";
+  
+  constructor(gridCustomAttributes: GridCustomAttributes, baseConfig: BaseConfig<any>) {
+    super(gridCustomAttributes, baseConfig);
+    Object.assign(this, gridCustomAttributes);
+  }
+}
+
+export class GridConfig {
+  label!: string
+  servicePagination: boolean
+  scrollable!: boolean
+  selectable!: boolean
+  selectType!: string
+  rowLevelUrl!: boolean
+  rowsPerPage!: number
+  columnConfiguration: Partial<ColumnConfiguration>[]
+  showAdvancedFilter!: boolean
+  filterConfig!: FilterConfiguration[]
+}
+
+export class ColumnConfiguration extends BaseConfig<any> {
+  override field!: string
+  override columnName!: string
+  sort!: boolean
+  filter!: boolean
+  filterType!: string
+  override width!: any
+  frozen!: boolean
+  override isHidden!: boolean
+  override className!: string
+  override editable!: boolean
+  override dependency!: any[]
+  override customAttributes!: Partial<BaseCustomAttributes> | null
+}
+
+export class FilterConfiguration {
+  field!: string
+  displayName!: string
+  width!: any
+  isHidden!: boolean
+  className!: string
+  editable!: boolean
+  validators!: string[]
+  dependency!: DependencyConfig<any>[]
+  componentType!: string
+  enableTrackChange!: boolean
+  trackChangeConfig!: boolean
+  customAttributes!: Partial<BaseCustomAttributes>
+}
+
+export interface PaginationModel {
+  strategy: IGenericStrategyInterface;
+  pageSize: number;
+  pageNumber: number;
+}
+
+// MultiSelectConfig (Image 20)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {ApiToCall} from "../../../request-model/api-to-call";
+
+export class MultiSelectConfig extends BaseCustomAttributes {
+  optionValue: string = "value";
+  optionLabel: string = "label";
+  dataKey: string | null = null;
+  onDemand!: boolean = false;
+  showHeader: boolean = true;
+  
+  constructor(multiSelectConfig: MultiSelectConfig, baseConfig: BaseConfig<any>) {
+    super(multiSelectConfig, baseConfig);
+    Object.assign(this, multiSelectConfig);
+  }
+}
+
+// SingleSelectConfig (Image 1)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+
+export class SingleSelectConfig extends BaseCustomAttributes {
+  optionValue: string = "value";
+  optionLabel: string = "label";
+  
+  constructor(singleSelectConfig: SingleSelectConfig, baseConfig: BaseConfig<any>) {
+    super(singleSelectConfig, baseConfig);
+    Object.assign(this, singleSelectConfig);
+  }
+}
+
+// TextConfig (Image 2)
+import { BaseConfig, BaseCustomAttributes } from "../base.config";
+
+export class TextConfig extends BaseCustomAttributes {
+  maxLength!: number;
+  minLength!: number;
+  helpText!: string;
+  showMaxCharacters!: boolean;
+  showCharactersRemaining!: boolean;
+  
+  constructor(textConfig: TextConfig, baseConfig: BaseConfig<any>) {
+    super(textConfig, baseConfig);
+    Object.assign(this, textConfig);
+  }
+}
+
+// TextareaConfig (Image 3)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+import {SIZE} from "../config.enums";
+
+export class TextareaConfig extends BaseCustomAttributes {
+  maxLength!: number;
+  minLength!: number;
+  helpText!: string;
+  showMaxCharacters!: boolean;
+  showCharactersRemaining!: boolean;
+  size: SIZE | null = null;
+  
+  constructor(textAreaConfig: TextareaConfig, baseConfig: BaseConfig<any>) {
+    super(textAreaConfig, baseConfig);
+    Object.assign(this, textAreaConfig);
+  }
+}
+
+// TreeCustomAttributes (Image 4)
+import {BaseConfig, BaseCustomAttributes} from "../base.config";
+
+export class TreeCustomAttributes extends BaseCustomAttributes {
+  buttonLabel: string | null = null;
+  
+  constructor(treeCustomAttributes: TreeCustomAttributes, baseConfig: BaseConfig<any>) {
+    super(treeCustomAttributes, baseConfig);
+    Object.assign(this, treeCustomAttributes);
+  }
+}
+
+// TableCellRendererDirective (Images 5-7)
+import {Directive, Input} from '@angular/core';
+import {BaseRenderDirective} from "../base-render.directive";
+import {FormControl, FormGroup} from "@angular/forms";
+import {ControlStrategy} from "../../../../strategies/field-strategies/control.strategy";
+import {ControlFactory} from "../../../../strategies/factory/control-factory";
+
+@Directive({
+  selector: '[ciaTableCellRenderer]'
+})
+export class TableCellRendererDirective extends BaseRenderDirective {
+  @Input("strategy") set strategy(strategy: any) {
+    this.initializeField(strategy);
+  }
+  
+  protected override async initializeField(strategy: any): Promise<void> {
+    await this.renderComponent(strategy);
+  }
+  
+  protected override async renderComponent(field: ControlStrategy): Promise<void> {
+    if (!this.vcr) return;
+    const componentType = await this.getComponent(field.config);
+    const componentReference = this.vcr.createComponent(componentType);
+    componentReference.instance.strategy = field;
+    field.component = componentReference.instance;
+    
+    field.component.outForm?.subscribe((data: any) => {
+      this.dependencyHandlerService.publishEvent(field.getUniqueRowId, (field.formGroup.get(field.id) as FormControl).value);
+      this.outForm?.emit(field, data);
+    });
+  }
+}
+
+// TableFilterRendererDirective (Images 6-7)
+import {Directive, Input} from '@angular/core';
+import {BaseRenderDirective} from "../base-render.directive";
+import {ControlStrategy} from "../../../../strategies/field-strategies/control.strategy";
+import {FormControl, FormGroup} from "@angular/forms";
+import {ControlFactory} from "../../../../strategies/factory/control-factory";
+
+@Directive({
+  selector: '[ciaTableFilterRenderer]'
+})
+export class TableFilterRendererDirective extends BaseRenderDirective {
+  @Input("gridId") gridId: string = "";
+  
+  @Input("filterType") set filterType(filterConfig: any) {
+    this.initializeField(filterConfig);
+  }
+  
+  protected override async initializeField(filterConfig: any): Promise<void> {
+    const factory = new ControlFactory();
+    
+    if (!filterConfig) {
+      throw new Error(`Filter Config Missing for Grid: ${this.gridId}`);
+    }
+    
+    let field: ControlStrategy = factory.getStrategy(filterConfig as any) as ControlStrategy;
+    field.formGroup = this.fieldRegistry.addFormControl(field.id, field.control);
+    await this.renderComponent(field);
+  }
+  
+  protected override async renderComponent(field: ControlStrategy): Promise<void> {
+    if (!this.vcr) return;
+    const componentType = await this.getComponent(field.config);
+    const componentReference = this.vcr.createComponent(componentType);
+    componentReference.instance.strategy = field;
+    field.component = componentReference.instance;
+    
+    field.component.outForm?.subscribe((data: any) => {
+      this.dependencyHandlerService.publishEvent(field.getUniqueRowId, (field.formGroup.get(field.id) as FormControl).value);
+      this.outForm?.emit(field, data);
+    });
+  }
+}
+
+// TableHeaderRendererDirective (Images 8-9)
+import {
+  IGridHeaderControl
+} from "../../../../grid-header-strategies/strategies/header/grid-header-control.interface";
+import {BaseRenderDirective} from "../base-render.directive";
+import {Directive} from "@angular/core";
+
+@Directive({
+  selector: '[ciaTableHeaderRenderer]'
+})
+export class TableHeaderRendererDirective extends BaseRenderDirective {
+  private _libConfig!: LibraryConfig;
+  get libConfig(): LibraryConfig { return this._libConfig; }
+  @Input("libConfig") set libConfig(value: LibraryConfig) {
+    this._libConfig = value;
+  }
+  
+  @Input("headerConfig") set headerConfig(value: Partial<BaseHeaderConfig>) {
+    this.factory = new GridHeaderFactory();
+    this.initializeFieldComponent(value);
+  }
+  
+  private initializeFieldComponent(value: Partial<BaseHeaderConfig>): void {
+    this.initializeGridHeaderStrategy(value);
+    ///* 
+    // * get the header strategy
+    // * create component
+    // */
+  }
+  
+  protected override async renderComponent(field: IGenericStrategyInterface | IGridHeaderControl): Promise<void> {
+    const fieldConfig = (field as IGridHeaderControl).config as BaseHeaderConfig;
+    const componentType = await this.getComponent(fieldConfig);
+    const componentReference = this.vcr.createComponent(componentType);
+    componentReference.instance.strategy = field;
+    field.component = componentReference.instance;
+  }
+  
+  private setHeaderStyles(style: string): void {
+    const parent: any = this.el.nativeElement.parentElement;
+    const styles = JSON.parse(style);
+    
+    if (parent && parent.classList.contains("p-datatable-header")) {
+      Object.entries(styles).forEach(([prop, value]) => {
+        this.renderer.setStyle(parent, prop, value, RenderStyleFlags.Important);
+      });
+    }
+  }
+  
+  private async initializeGridHeaderStrategy(config: Partial<BaseHeaderConfig>): Promise<void> {
+    const field = this.factory.getStrategy(config).getStrategy(config) as IGridHeaderControl;
+    if (!field) throw new Error("HEADER STRATEGY NOT FOUND FOR ${config.componentType}");
+    
+    this.setHeaderStyles(field.config.style);
+    field.libConfig = this.libConfig;
+    await this.renderComponent(field);
+  }
+}
+
+// BaseRenderDirective (Images 10-11)
+import {IGenericGridHeaderStrategyFactory} from "../../strategies/factory/grid-factories/grid-generic-header.strategy";
+import {Directive, ElementRef, EventEmitter, Input, Output} from "@angular/core";
+import {ViewContainerRef} from "@angular/core";
+import {LIBRARY_CONFIG} from "@angular/core";
+import {protected renderer: Renderer2} from "@angular/core";
+import {protected fieldRegistry: FieldRegistryService} from "@angular/core";
+import {protected commonRenderService: CommonRenderService} from "@angular/core";
+import {protected commonFormService: CommonFormService} from "@angular/core";
+import {protected dependencyHandlerService: DependencyHandlerService} from "@angular/core";
+import {protected el: ElementRef} from "@angular/core";
+import {protected cdr: ChangeDetectorRef} from "@angular/core";
+
+@Directive({ 
+  selector: '[baseComponentRenderer]'
+})
+export abstract class BaseRenderDirective {
+  protected factory!: IGenericGridHeaderStrategyFactory|IGenericGridActionStrategyFactory;
+  @Output() outForm: EventEmitter<any> = new EventEmitter<any>();
+  @Output() onClick: EventEmitter<any> = new EventEmitter<any>();
+  
+  constructor( no usages & Drew Atkison +1
+    public vcr: ViewContainerRef,
+    @Inject(LIBRARY_CONFIG) public config: UILibraryConfig,
+    protected renderer: Renderer2,
+    protected fieldRegistry: FieldRegistryService,
+    protected commonRenderService: CommonRenderService,
+    protected commonFormService: CommonFormService,
+    protected dependencyHandlerService: DependencyHandlerService,
+    protected el: ElementRef,
+    protected cdr: ChangeDetectorRef
+  ) {}
+  
+  protected initializeField(strategy: IGenericStrategyInterface): void {};
+  protected initializeField(strategyArr: Array<IGenericStrategyInterface>): void {};
+  protected abstract renderComponent(field: IGenericStrategyInterface|IGridHeaderControl): void;
+  
+  getUIVariant(): void {
+    this.commonRenderService.setUIVariant(this.config.uILibrary);
+    StrategyRegisterConstant.RegisterComponentTypes();
+    StrategyRegisterConstant.RegisterGridFieldings();
+    StrategyRegisterConstant.RegisterGridHeaderActions();
+    this.factory = new ControlFactory();
+  }
+  
+  protected updateDependency(field: any, data: any): void {
+    this.dependencyHandlerService.publishEvent(field.id, data);
+    console.log("testing:", field.id);
+  }
+  
+  protected async getComponent(fieldConfig: BaseConfig<BaseCustomAttributes>|BaseHeaderConfig): Promise<Type<any>> {
+    const componentType = await this.commonRenderService.getComponentByComponentId(fieldConfig);
+    if (!componentType) throw new Error("Component ${componentType} NOT FOUND");
+    return componentType as Type<any>;
+  }
+  
+  getFieldSize(field: any): string {
+    const size: number = field.config.width;
+    return (field.config.isHidden ? "col-md-0(size)" : "");
+  }
+}
+
+// ChildComponentRendererDirective (Image 12)
+import {Directive, ViewContainerRef} from '@angular/core';
+
+@Directive({
+  selector: '[childComponentRenderer]'
+})
+export class ChildComponentRendererDirective {
+  constructor(public viewContainerRef: ViewContainerRef) {}
+}
+
+// CommonLibRendererDirective (Images 13-14)
+import {ComponentRef, Directive, EventEmitter, Input, Output} from '@angular/core';
+import {LibraryConfig} from "../../../model/configs/library.config";
+import {FormGroup} from "@angular/forms";
+import {BaseRenderDirective} from "../base-render.directive";
+import type {CiaCommonUIComponent} from "../../../shared/cia-common-ui.component";
+import {BaseConfig} from "../../../model/configs/base.config";
+import {ControlStrategy} from "../../../strategies/field-strategies/control.strategy";
+
+@Directive({
+  selector: '[ciaCommonLibRenderer]'
+})
+export class CommonLibRendererDirective extends BaseRenderDirective {
+  private _libConfig!: LibraryConfig;
+  get libConfig(): LibraryConfig { return this._libConfig; }
+  @Input("libConfig") set libConfig(value: LibraryConfig) {
+    this._libConfig = value;
+  }
+  
+  private _parentForm!: FormGroup;
+  get parentForm(): FormGroup { return this._parentForm; }
+  @Input("parentForm") set parentForm(value: FormGroup) {
+    this._parentForm = value;
+  }
+  
+  private _formConfig: BaseConfig<any>[] = [];
+  get formConfig(): BaseConfig<any>[] { return this._formConfig; }
+  @Input("formConfig") set formConfig(formConfig: any[]) {
+    this._formConfig = formConfig;
+    this.handleFormConfig();
+  }
+  
+  private _data: any;
+  get data(): any { return this._data; }
+  @Input("data") set data(data: any) {
+    if (!data) return;
+    this._data = data;
+  }
+  
+  private _refData: any;
+  get refData(): any { return this._refData; }
+  @Input("refData") set refData(data: any) {
+    this._refData = data;
+  }
+  
+  @Output() gridActions: EventEmitter<any> = new EventEmitter();
+  
+  protected override async renderComponent(): Promise<void> {
+    const ciaCommonUIComponent: Type<CiaCommonUIComponent> = (await import('../../../shared/cia-common-ui.component')).CiaCommonUIComponent;
+    this.vcr.clear();
+    const commonComponent: ComponentRef<CiaCommonUIComponent> = this.vcr.createComponent(ciaCommonUIComponent);
+    
+    commonComponent.instance.libConfig = this.libConfig;
+    commonComponent.instance.parentForm = this.parentForm;
+    commonComponent.instance.formConfig = this.formConfig;
+    commonComponent.instance.data = this.data;
+    commonComponent.instance.refData = this.refData;
+    
+    commonComponent.instance.outForm.subscribe((value: {field: ControlStrategy, value: data: any}) => {
+      this.handleOutputChange(value.field, value.data);
+      this.outForm.emit(value);
+    });
+    
+    commonComponent.instance.onClick.subscribe((value: any) => this.onClick.emit(value));
+    commonComponent.instance.gridAction.subscribe((value: any) => this.gridActions.emit(value));
+  }
+  
+  private handleOutputs(commonComponent: ComponentRef<CiaCommonUIComponent>): void {
+    commonComponent.instance.outForm.subscribe((value: any) => this.outForm.emit(value));
+    commonComponent.instance.onClick.subscribe((value: any) => this.onClick.emit(value));
+    commonComponent.instance.gridAction.subscribe((value: any) => {
+      this.updateDependency(value.field, data);
+    });
+  }
+  
+  handleOutputChange(field: any, data: any): void {
+    this.updateDependency(field, data);
+  }
+}
+
+// ComponentRendererDirective (Images 15-17)
+import {ComponentRef, Directive, EventEmitter, Input, Output} from '@angular/core';
+import {Subject} from 'rxjs';
+
+@Directive({
+  selector: '[componentRenderer]'
+})
+export class ComponentRendererDirective extends BaseRenderDirective {
+  @ContentChildren(ChildComponentRendererDirective, { read: ChildComponentRendererDirective})
+  children!: QueryList<ChildComponentRendererDirective>;
+  
+  get childDirective(): ChildComponentRendererDirective { return this.children.get(0) as ChildComponentRendererDirective; }
+  
+  private _libConfig!: LibraryConfig;
+  get libConfig(): LibraryConfig { return this._libConfig; }
+  @Input("libConfig") set libConfig(value: LibraryConfig) {
+    this._libConfig = value;
+  }
+  
+  private _parentForm!: FormGroup;
+  get parentForm(): FormGroup { return this._parentForm; }
+  @Input("parentForm") set parentForm(value: FormGroup) {
+    this._parentForm = value;
+  }
+  
+  private formConfig: BaseConfig<any>[] = [];
+  get formConfigs(): BaseConfig<any>[] { return this._formConfig; }
+  @Input("formConfig") set formConfig(value: any) {
+    if (this._formConfig) {
+      this.initializeFields(value);
+    }
+  }
+  
+  private _data: any;
+  get data(): any { return this._data; }
+  @Input("data") set data(data: any) {
+    this._data = data;
+  }
+  
+  private _refData: any;
+  
+  @Output() gridActions: EventEmitter<any> = new EventEmitter();
+  
+  ngOnInit(): void { no usages & Drew Atkison
+    this.fieldRegistry.initializeData.subscribe(() => this.initializeData(this.data));
+  }
+  
+  protected override async initializeFields(formConfig: any[]): Promise<void> {
+    this.getUIVariant();
+    this.componentRef.clear();
+    
+    for (const config of formConfig) {
+      let field = (this.factory.getStrategy(config)) as ControlStrategy;
+      field.libraryConfig = this.libConfig;
+      field.formGroup = this.parentForm;
+      ? this.fieldRegistry.addToParentForm(field.id, field.control, this.parentForm)
+      : this.fieldRegistry.addFormControl(field.id, field.control);
+      
+      this.fieldRegistry.register(field);
+      
+      config.config = config;
+      await this.renderComponent(field);
+    }
+    
+    //*** Only place to use this ***
+    this.fieldRegistry.initializeData.next(true);
+  }
+  
+  private initializeData(data: any) { Show usages & Drew Atkison +1
+    this.fieldRegistry.fields = DataInitializer.initializeData(data, this.fieldRegistry.fields);
+  }
+  
+  private async createLoader() { no usages & Drew Atkison
+    const ComponentLoader = (await import('../../../components/shared/component-loader.component')).ComponentLoader;
+    this.componentRef.clear();
+    this.componentRef.createComponent(ComponentLoader);
+  }
+  
+  protected override async renderComponent(field: IGenericStrategyInterface): Promise<void> {
+    const componentType = await this.getComponent(field.config);
+    const componentReference = this.vcr.createComponent(componentType)
+    componentReference.location.nativeElement.style.display = "block";
+    componentReference.location.nativeElement.className = `${this.getFieldSize(field)} ${field.config.className}`;
+    componentReference.instance.strategy = field;
+    field.updateEnabledDisabledState(field.config.editable);
+    
+    componentReference.instance.outForm?.subscribe((data: any) => {
+      this.handleOutputChanges(field, data);
+    });
+    
+    componentReference.instance.onClick?.subscribe((data: any) => this.onClick.emit(data));
+    componentReference.instance.gridActions?.subscribe((data: any) => this.gridActions.emit(data));
+  }
+  
+  handleOutputChanges(field: any, data: any) { Show usages & Namwani, Rashi [TECH] +1
+    console.log("Handle field", field);
+    this.updateDependency(field, data);
+    this.outForm.emit(field, data);
+  }
+}
+
+// BehaviorStrategyFactory (Image 18)
+import {Injectable} from '@angular/core';
+import {IBehaviorStrategyFactory} from "../interfaces/IBehaviorStrategyFactory";
+import {DialogButtonConfirmBehavior} from "../strategy/behaviors/dialog-button-confirm.behavior";
+import {DialogOpenBehavior} from "../strategy/behaviors/dialog-open.behavior";
+
+@Injectable({
+  providedIn: 'root'
+})
+export class BehaviorStrategyFactory implements IBehaviorStrategyFactory {
+  private _strategies: {[key: string]: IFieldBehaviorStrategy} = {
+    [Behavior.MODIFY_VALUE]: new ModifyValueBehavior(),
+    [Behavior.TRANSFORM_VALUE]: new TransformValueBehavior(),
+    [Behavior.RESET_VALUE]: new ResetValueBehavior(),
+    [Behavior.SHOW]: new ModifyConfigBehavior(),
+    [Behavior.HIDE]: new ModifyConfigBehavior(),
+    [Behavior.ENABLE]: new ModifyConfigBehavior(),
+    [Behavior.DISABLE]: new ModifyConfigBehavior(),
+    [Behavior.ADD_VALIDATORS]: new ModifyValidatorBehavior(),
+    [Behavior.REMOVE_VALIDATORS]: new ModifyValidatorBehavior(),
+    [Behavior.DIALOG_CONFIRM]: new DialogButtonConfirmBehavior(),
+    [Behavior.DIALOG_OPEN]: new DialogOpenBehavior()
+  };
+  
+  private get strategies(): {[key: string]: IFieldBehaviorStrategy} { return this._strategies; }
+  
+  getStrategy(dependedFunction: string): IFieldBehaviorStrategy { Show usages & Drew Atkison +1
+    return this._strategies[dependedFunction];
+  }
+  
+  addBehaviorStrategies(behaviorStrategies: {[key: string]: IFieldBehaviorStrategy}): void { Show usages & Drew Atkison
+    this._strategies = {...this._strategies, ...behaviorStrategies};
+  }
+}
+
+// ConditionStrategyFactory (Image 19)
+import {IConditionStrategy} from "../interfaces/IConditionStrategy";
+import {ClickedCondition} from "../strategy/conditions/clicked.condition";
+import {ExistsCondition} from "../strategy/conditions/exists.condition";
+import {SelectedCondition} from "../strategy/conditions/selected.condition";
+import {DependencyConfig} from "../model/configs/dependency.config";
+import {Injectable} from "@angular/core";
+import {IConditionStrategyFactory} from "../interfaces/IConditionStrategyFactory";
+import {OnChangeCondition} from "../strategy/conditions/on-change.condition";
+import {OnLoadCondition} from "../strategy/conditions/on-load.condition";
+import {AnyExistsCondition} from "../strategy/conditions/any-exists.condition";
+
+@Injectable({ Show usages & Drew Atkison +2
+  providedIn: 'root'
+})
+export class ConditionStrategyFactory implements IConditionStrategyFactory {
+  private _strategies: {[key: string]: IConditionStrategy} = {
+    [Condition.CLICKED]: new ClickedCondition(),
+    [Condition.VALUE_EXISTS]: new ExistsCondition(),
+    [Condition.ON_CHANGE]: new OnChangeCondition(),
+    [Condition.VALUE_SELECTED]: new SelectedCondition(),
+    [Condition.LOADED]: new OnLoadCondition(),
+    [Condition.ANY_VALUE_EXISTS]: new AnyExistsCondition()
+  };
+  
+  private get strategies(): {[key: string]: IConditionStrategy} { return this._strategies; }
+  
+  getStrategy(dependedFunction: string): IConditionStrategy | undefined { Show usages & Drew Atkison +
+    return this._strategies[dependedFunction];
+  }
+  
+  addConditionStrategies(conditionStrategies: {[key: string]: IConditionStrategy}): void { Show usages & Drew Atkison
+    this._strategies = {...this._strategies, ...conditionStrategies};
+  }
+}
+
+// AbstractJsonMapper (Image 20)
+import "reflect-metadata";
+import {IJsonAdapter} from "./json-adapter.interface";
+
+export abstract class AbstractJsonMapper implements IJsonAdapter {
+  constructor() {
+    const mappingType: any = Reflect.getMetadata("mappingType", this.constructor);
+    if (!mappingType) {
+      throw new Error(`Class ${this.constructor.name} is missing the required @mappingType decorator. Please add`);
+    }
+  }
+  
+  abstract transform(data: any): any;
+}
+
+// Image 1: selected.condition.ts
+import { DependencyConfig } from "../../../model/configs/dependency.config";
+import { ControlStrategy } from "../../../strategies/field-strategies/control.strategy";
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+import { 
+  ModifyValueCustomAttributes 
+} from "../../../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+// KEY: selected
+export class SelectedCondition implements IConditionStrategy {
+  isMet(field: ControlStrategy, dependency: DependencyConfig<ModifyValueCustomAttributes>, data?: any): boolean {
+    if (data) {
+      return dependency?.values?.includes(String(data)) ? true : false;
+    }
+    return false;
+  }
+}
+
+// Image 2: any-exists.condition.ts
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+import { IGenericStrategyInterface } from "../../../strategies/generic-strategy.interface";
+import { DependencyConfig } from "../../../model/configs/dependency.config";
+import { DependencyBaseCustomAttributes } from "../../../model/configs/dependency-base-custom-attributes";
+
+export class AnyExistsCondition implements IConditionStrategy {
+  isMet(dependentField: IGenericStrategyInterface, config?: DependencyConfig<DependencyBaseCustomAttributes>): boolean {
+    const allDependentFields = config?.customAttributes?.allDependentFields;
+    let arr: Array<any> = [];
+    
+    if (allDependentFields && allDependentFields.length) {
+      allDependentFields.map((field: string) => {
+        const val = dependency.formGroup.getRawValueOf(field);
+        arr.push(Array.isArray(val) ? val.length > 0 : !!val);
+      });
+    }
+    
+    return arr.some(val => val === true);
+  }
+}
+
+// Image 3: clicked.condition.ts
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+
+export class ClickedCondition implements IConditionStrategy {
+  isMet(): boolean {
+    return true;
+  }
+}
+
+// Image 4: exists.condition.ts
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+import { IGenericStrategyInterface } from "../../../strategies/field-strategies/generic-strategy.interface";
+
+export class ExistsCondition implements IConditionStrategy {
+  isMet(dependentField: IGenericStrategyInterface): boolean {
+    return Array.isArray(dependentField.getValue()) ? dependentField.getValue().length > 0 : !!dependentField.getValue();
+  }
+}
+
+// Image 5: on-change.condition.ts
+import { DependencyConfig } from "../../../model/configs/dependency.config";
+import { ControlStrategy } from "../../../strategies/field-strategies/control.strategy";
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+import { 
+  ModifyValueCustomAttributes 
+} from "../../../model/configs/dependency-custom-attributes/modify-value-custom-attributes.config";
+
+// KEY: onChange
+export class OnChangeCondition implements IConditionStrategy {
+  isMet(field: ControlStrategy, dependency: DependencyConfig<ModifyValueCustomAttributes>): boolean {
+    return true;
+  }
+}
+
+// Image 6: on-load.condition.ts
+import { DependencyConfig } from "../../../model/configs/dependency.config";
+import { IGenericStrategyInterface } from "../../../strategies/field-strategies/generic-strategy.interface";
+import { IConditionStrategy } from "../../../interfaces/IConditionStrategy";
+
+export class OnLoadCondition implements IConditionStrategy {
+  isMet(dependentField: IGenericStrategyInterface, dependency?: DependencyConfig<any>): boolean {
+    return true;
+  }
+}
+
