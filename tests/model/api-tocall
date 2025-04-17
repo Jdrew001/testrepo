@@ -1,0 +1,271 @@
+import { expect } from 'chai';
+import { describe, it } from 'mocha';
+import { ApiToCall } from '../path/to/api-to-call';
+import { Method } from '../path/to/api-to-call';
+import { MappingInstruction } from '../../utils/http-request-helpers/mapping-instruction';
+import { Transformer } from '../../utils/http-request-helpers/transform';
+import sinon from 'sinon';
+
+describe('ApiToCall', () => {
+  describe('constructor', () => {
+    it('should correctly initialize properties from constructor input', () => {
+      const mockItem = {
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET,
+        params: [new MappingInstruction()],
+        module: 'test-module',
+        requestType: 'REFERENCE',
+        jsonAdapter: ['adapter1', 'adapter2'],
+        options: { body: { test: 'body' }, params: { test: 'params' }, headers: { test: 'headers' } }
+      };
+
+      const apiToCall = new ApiToCall(mockItem);
+
+      expect(apiToCall.key).to.equal(mockItem.key);
+      expect(apiToCall.context).to.equal(mockItem.context);
+      expect(apiToCall.endpoint).to.equal(mockItem.endpoint);
+      expect(apiToCall.method).to.equal(mockItem.method);
+      expect(apiToCall.module).to.equal(mockItem.module);
+      expect(apiToCall.requestType).to.equal(mockItem.requestType);
+      expect(apiToCall.jsonAdapter).to.deep.equal(mockItem.jsonAdapter);
+      expect(apiToCall.options).to.deep.equal({ body: null, params: null, headers: null });
+    });
+
+    it('should set default values when not provided in constructor', () => {
+      const mockItem = {
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      };
+
+      const apiToCall = new ApiToCall(mockItem as any);
+
+      expect(apiToCall.key).to.equal(mockItem.key);
+      expect(apiToCall.options).to.deep.equal({ body: null, params: null, headers: null });
+      expect(apiToCall.jsonAdapter).to.deep.equal([]);
+    });
+  });
+
+  describe('buildRequest', () => {
+    it('should call buildBody when method is POST', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.POST
+      });
+      const buildBodyStub = sinon.stub(apiToCall, 'buildBody').returns(apiToCall);
+      const testData = { test: 'data' };
+
+      const result = apiToCall.buildRequest(testData);
+
+      expect(buildBodyStub.calledOnceWith(testData)).to.be.true;
+      expect(result).to.equal(apiToCall);
+      
+      buildBodyStub.restore();
+    });
+
+    it('should call buildGetRequest when method is not POST', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      });
+      const buildGetRequestStub = sinon.stub(apiToCall, 'buildGetRequest').returns(apiToCall);
+      const testData = { test: 'data' };
+
+      const result = apiToCall.buildRequest(testData);
+
+      expect(buildGetRequestStub.calledOnceWith(testData)).to.be.true;
+      expect(result).to.equal(apiToCall);
+      
+      buildGetRequestStub.restore();
+    });
+  });
+
+  describe('buildBody', () => {
+    it('should set body in options and return this', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.POST,
+        module: 'test-module',
+        params: [new MappingInstruction()]
+      });
+      const getRequestBodyStub = sinon.stub(apiToCall as any, 'getRequestBody').returns(new Map([['key1', 'value1']]));
+      const testData = { test: 'data' };
+
+      const result = apiToCall.buildBody(testData);
+
+      expect(getRequestBodyStub.calledOnceWith(testData, apiToCall.module, apiToCall.params)).to.be.true;
+      expect(apiToCall.options.body).to.deep.equal({ key1: 'value1' });
+      expect(result).to.equal(apiToCall);
+      
+      getRequestBodyStub.restore();
+    });
+  });
+
+  describe('buildGetRequest', () => {
+    it('should update options with params and return this', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      });
+      const testParams = { param1: 'value1', param2: 'value2' };
+
+      const result = apiToCall.buildGetRequest(testParams);
+
+      expect(apiToCall.options.params).to.deep.equal(testParams);
+      expect(result).to.equal(apiToCall);
+    });
+  });
+
+  describe('buildHeaders', () => {
+    it('should update options with headers and return this', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      });
+      const testHeaders = ['Content-Type: application/json', 'Authorization: Bearer token'];
+
+      const result = apiToCall.buildHeaders(testHeaders);
+
+      expect(apiToCall.options.headers).to.deep.equal(testHeaders);
+      expect(result).to.equal(apiToCall);
+    });
+  });
+
+  describe('getRequestBody', () => {
+    it('should transform data according to mapping instructions', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.POST
+      });
+      
+      const rawData = { 
+        sourceField1: 'value1',
+        sourceField2: 'value2' 
+      };
+      
+      const mappingInstructions = [
+        { mapFrom: 'sourceField1', mapTo: 'targetField1', dataType: 'string' },
+        { mapFrom: 'sourceField2', mapTo: 'targetField2', dataType: 'string' }
+      ];
+      
+      const transformStub = sinon.stub(Transformer, 'transform');
+      transformStub.onFirstCall().returns('transformed1');
+      transformStub.onSecondCall().returns('transformed2');
+      
+      const method = (apiToCall as any).getRequestBody;
+      const result = method.call(apiToCall, rawData, 'test-module', mappingInstructions);
+      
+      expect(result instanceof Map).to.be.true;
+      expect(result.get('targetField1')).to.equal('transformed1');
+      expect(result.get('targetField2')).to.equal('transformed2');
+      
+      transformStub.restore();
+    });
+
+    it('should handle errors during transformation', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.POST
+      });
+      
+      const rawData = { 
+        sourceField1: 'value1'
+      };
+      
+      const mappingInstructions = [
+        { mapFrom: 'sourceField1', mapTo: 'targetField1', dataType: 'string' }
+      ];
+      
+      const transformStub = sinon.stub(Transformer, 'transform').throws(new Error('Test error'));
+      
+      const consoleErrorSpy = sinon.spy(console, 'error');
+      
+      const method = (apiToCall as any).getRequestBody;
+      const result = method.call(apiToCall, rawData, 'test-module', mappingInstructions);
+      
+      expect(result instanceof Map).to.be.true;
+      expect(result.size).to.equal(0);
+      expect(consoleErrorSpy.calledOnce).to.be.true;
+      expect(consoleErrorSpy.firstCall.args[0]).to.include('ERROR INSIDE {getRequestBody}:');
+      
+      transformStub.restore();
+      consoleErrorSpy.restore();
+    });
+  });
+
+  describe('findClosestKey', () => {
+    it('should find the closest key within threshold', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      });
+      
+      const obj = {
+        'apple': 'value1',
+        'banana': 'value2',
+        'applesauce': 'value3'
+      };
+      
+      const distanceStub = sinon.stub();
+      distanceStub.withArgs('aple', 'apple').returns(1);
+      distanceStub.withArgs('aple', 'banana').returns(5);
+      distanceStub.withArgs('aple', 'applesauce').returns(6);
+      
+      const originalDistance = (apiToCall as any).levenshteinDistance;
+      (apiToCall as any).levenshteinDistance = distanceStub;
+      
+      const method = (apiToCall as any).findClosestKey;
+      const result = method.call(apiToCall, 'aple', obj, 2);
+      
+      expect(result).to.equal('apple');
+      
+      (apiToCall as any).levenshteinDistance = originalDistance;
+    });
+
+    it('should return undefined when no key is within threshold', () => {
+      const apiToCall = new ApiToCall({
+        key: 'test-key',
+        context: 'test-context',
+        endpoint: 'test-endpoint',
+        method: Method.GET
+      });
+      
+      const obj = {
+        'apple': 'value1',
+        'banana': 'value2',
+        'cherry': 'value3'
+      };
+      
+      const distanceStub = sinon.stub().returns(10);
+      
+      const originalDistance = (apiToCall as any).levenshteinDistance;
+      (apiToCall as any).levenshteinDistance = distanceStub;
+      
+      const method = (apiToCall as any).findClosestKey;
+      const result = method.call(apiToCall, 'xyz', obj, 2);
+      
+      expect(result).to.be.undefined;
+      
+      (apiToCall as any).levenshteinDistance = originalDistance;
+    });
+  });
+});
