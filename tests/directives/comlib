@@ -1,0 +1,270 @@
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { Component, ViewContainerRef, ViewChild, ElementRef } from '@angular/core';
+import { CommonLibRendererDirective } from './common-lib-renderer.directive';
+import { CommonRenderService } from '../../services/common-render.service';
+import { FieldRegistryService } from '../../services/field-registry.service';
+import { CommonFormService } from '../../services/common-form.service';
+import { DependencyHandlerService } from '../../services/dependency-handler.service';
+import { UILibraryConfig } from '../../model/configs/ui-library.config';
+import { FormGroup } from '@angular/forms';
+import { LibraryConfig } from '../../model/configs/library.config';
+import { BaseConfig } from '../../model/configs/base-config';
+import { Subject } from 'rxjs';
+import { ComponentRef } from '@angular/core';
+
+@Component({
+  template: `<div ciaCommonLibRenderer></div>`
+})
+class TestHostComponent {
+  @ViewChild(CommonLibRendererDirective) directive!: CommonLibRendererDirective;
+}
+
+describe('CommonLibRendererDirective', () => {
+  let component: TestHostComponent;
+  let fixture: ComponentFixture<TestHostComponent>;
+  let directive: CommonLibRendererDirective;
+  let mockLibConfig: LibraryConfig;
+  let mockParentForm: FormGroup;
+  let mockFormConfig: BaseConfig<any>[];
+  let mockVcr: jasmine.SpyObj<ViewContainerRef>;
+  let commonRenderServiceSpy: jasmine.SpyObj<CommonRenderService>;
+  
+  beforeEach(() => {
+    mockLibConfig = { name: 'Test Config' } as LibraryConfig;
+    mockParentForm = new FormGroup({});
+    mockFormConfig = [
+      { field: 'field1' } as BaseConfig<any>,
+      { field: 'field2' } as BaseConfig<any>
+    ];
+    
+    mockVcr = jasmine.createSpyObj('ViewContainerRef', ['clear', 'createComponent']);
+    
+    commonRenderServiceSpy = jasmine.createSpyObj('CommonRenderService', [
+      'getComponentByComponentType'
+    ]);
+
+    spyOn(console, 'log');
+
+    TestBed.configureTestingModule({
+      declarations: [
+        CommonLibRendererDirective,
+        TestHostComponent
+      ],
+      providers: [
+        { provide: ViewContainerRef, useValue: mockVcr },
+        { provide: UILibraryConfig, useValue: { uiLibrary: 'test' } },
+        { provide: CommonRenderService, useValue: commonRenderServiceSpy },
+        { provide: FieldRegistryService, useValue: jasmine.createSpyObj('FieldRegistryService', ['register']) },
+        { provide: CommonFormService, useValue: jasmine.createSpyObj('CommonFormService', ['registerFormElement']) },
+        { provide: DependencyHandlerService, useValue: jasmine.createSpyObj('DependencyHandlerService', ['publishEvent']) },
+        { provide: ElementRef, useValue: {} },
+        { provide: 'ChangeDetectorRef', useValue: {} }
+      ]
+    });
+
+    fixture = TestBed.createComponent(TestHostComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    directive = component.directive;
+  });
+
+  it('should create an instance', () => {
+    expect(directive).toBeTruthy();
+  });
+
+  describe('Input properties', () => {
+    it('should set and get libConfig', () => {
+      directive.libConfig = mockLibConfig;
+      expect(directive.libConfig).toBe(mockLibConfig);
+    });
+
+    it('should set and get parentForm', () => {
+      directive.parentForm = mockParentForm;
+      expect(directive.parentForm).toBe(mockParentForm);
+    });
+
+    it('should set and get formConfig and call renderComponent', () => {
+      spyOn(directive, 'renderComponent');
+      directive.formConfig = mockFormConfig;
+      expect(directive.formConfig).toBe(mockFormConfig);
+      expect(directive.renderComponent).toHaveBeenCalled();
+    });
+
+    it('should set and get data', () => {
+      const testData = { test: 'data' };
+      directive.data = testData;
+      expect(directive.data).toBe(testData);
+    });
+
+    it('should set and get refData', () => {
+      const testRefData = { ref: 'data' };
+      directive.refData = testRefData;
+      expect(directive.refData).toBe(testRefData);
+    });
+  });
+
+  describe('gridActions EventEmitter', () => {
+    it('should initialize gridActions EventEmitter', () => {
+      expect(directive.gridActions).toBeTruthy();
+    });
+  });
+
+  describe('renderComponent', () => {
+    it('should import CiaCommonUiComponent and create component', fakeAsync(() => {
+      const mockCiaCommonUiComponent = {};
+      const mockComponentRef = {
+        instance: {
+          libConfig: undefined,
+          parentForm: undefined,
+          formConfig: undefined,
+          data: undefined,
+          refData: undefined,
+          outForm: new Subject(),
+          outClick: new Subject(),
+          gridAction: new Subject()
+        }
+      };
+      
+      // Setup dynamic import mock
+      spyOn(window, 'import').and.returnValue(
+        Promise.resolve({ CiaCommonUiComponent: mockCiaCommonUiComponent })
+      );
+      
+      mockVcr.createComponent.and.returnValue(mockComponentRef as unknown as ComponentRef<any>);
+      
+      directive.renderComponent();
+      tick(); // Wait for async operations
+      
+      expect(window.import).toHaveBeenCalledWith('../../shared/cia-common-ui.component');
+      expect(mockVcr.clear).toHaveBeenCalled();
+      expect(mockVcr.createComponent).toHaveBeenCalledWith(mockCiaCommonUiComponent);
+    }));
+    
+    it('should handle inputs and outputs correctly', fakeAsync(() => {
+      // Create mock component with instances
+      const mockComponentRef = {
+        instance: {
+          libConfig: undefined,
+          parentForm: undefined,
+          formConfig: undefined,
+          data: undefined,
+          refData: undefined,
+          outForm: { subscribe: jasmine.createSpy('subscribe') },
+          outClick: { subscribe: jasmine.createSpy('subscribe') },
+          gridAction: { subscribe: jasmine.createSpy('subscribe') }
+        }
+      };
+      
+      // Setup dynamic import mock
+      spyOn(window, 'import').and.returnValue(
+        Promise.resolve({ CiaCommonUiComponent: {} })
+      );
+      
+      mockVcr.createComponent.and.returnValue(mockComponentRef as unknown as ComponentRef<any>);
+      
+      // Setup directive properties
+      directive.libConfig = mockLibConfig;
+      directive.parentForm = mockParentForm;
+      directive.formConfig = mockFormConfig;
+      directive.data = { test: 'data' };
+      directive.refData = { ref: 'data' };
+      
+      // Setup spies for handleOutputChanges
+      spyOn(directive as any, 'handleOutputChanges');
+      spyOn(directive.outClicks, 'emit');
+      spyOn(directive.gridActions, 'emit');
+      
+      directive.renderComponent();
+      tick(); // Wait for async operations
+      
+      // Verify inputs set correctly
+      expect(mockComponentRef.instance.libConfig).toBe(mockLibConfig);
+      expect(mockComponentRef.instance.parentForm).toBe(mockParentForm);
+      expect(mockComponentRef.instance.formConfig).toBe(mockFormConfig);
+      expect(mockComponentRef.instance.data).toBe(directive.data);
+      expect(mockComponentRef.instance.refData).toBe(directive.refData);
+      
+      // Verify subscriptions
+      expect(mockComponentRef.instance.outForm.subscribe).toHaveBeenCalled();
+      expect(mockComponentRef.instance.outClick.subscribe).toHaveBeenCalled();
+      expect(mockComponentRef.instance.gridAction.subscribe).toHaveBeenCalled();
+      
+      // Test subscription callbacks
+      const outFormCallback = mockComponentRef.instance.outForm.subscribe.calls.argsFor(0)[0];
+      const outClickCallback = mockComponentRef.instance.outClick.subscribe.calls.argsFor(0)[0];
+      const gridActionCallback = mockComponentRef.instance.gridAction.subscribe.calls.argsFor(0)[0];
+      
+      // Invoke callbacks
+      const testValue = { field: 'testField', data: 'testData' };
+      outFormCallback(testValue);
+      outClickCallback(testValue);
+      gridActionCallback(testValue);
+      
+      // Verify correct handling
+      expect(directive['handleOutputChanges']).toHaveBeenCalledWith(testValue.field, testValue.data);
+      expect(directive.outClicks.emit).toHaveBeenCalledWith(testValue);
+      expect(directive.gridActions.emit).toHaveBeenCalledWith(testValue);
+    }));
+  });
+
+  describe('handleInputs', () => {
+    it('should set component instance properties', () => {
+      const mockComponent = {
+        instance: {
+          libConfig: undefined,
+          parentForm: undefined,
+          formConfig: undefined,
+          data: undefined,
+          refData: undefined
+        }
+      };
+      
+      directive.libConfig = mockLibConfig;
+      directive.parentForm = mockParentForm;
+      directive.formConfig = mockFormConfig;
+      directive.data = { test: 'data' };
+      directive.refData = { ref: 'data' };
+      
+      directive['handleInputs'](mockComponent as any);
+      
+      expect(mockComponent.instance.libConfig).toBe(mockLibConfig);
+      expect(mockComponent.instance.parentForm).toBe(mockParentForm);
+      expect(mockComponent.instance.formConfig).toBe(mockFormConfig);
+      expect(mockComponent.instance.data).toBe(directive.data);
+      expect(mockComponent.instance.refData).toBe(directive.refData);
+    });
+  });
+
+  describe('handleOutputs', () => {
+    it('should subscribe to component instance event emitters', () => {
+      const mockComponent = {
+        instance: {
+          outForm: { subscribe: jasmine.createSpy('subscribe') },
+          outClick: { subscribe: jasmine.createSpy('subscribe') },
+          gridAction: { subscribe: jasmine.createSpy('subscribe') }
+        }
+      };
+      
+      directive['handleOutputs'](mockComponent as any);
+      
+      expect(mockComponent.instance.outForm.subscribe).toHaveBeenCalled();
+      expect(mockComponent.instance.outClick.subscribe).toHaveBeenCalled();
+      expect(mockComponent.instance.gridAction.subscribe).toHaveBeenCalled();
+    });
+  });
+
+  describe('handleOutputChanges', () => {
+    it('should call updateDependency and emit outForms', () => {
+      spyOn(directive as any, 'updateDependency');
+      spyOn(directive.outForms, 'emit');
+      
+      const mockField = { id: 'testField' };
+      const mockData = { value: 'testValue' };
+      
+      directive['handleOutputChanges'](mockField, mockData);
+      
+      expect(directive['updateDependency']).toHaveBeenCalledWith(mockField, mockData);
+      expect(directive.outForms.emit).toHaveBeenCalledWith({ field: mockField, data: mockData });
+    });
+  });
+});

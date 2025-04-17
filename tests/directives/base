@@ -1,0 +1,200 @@
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { Component, ViewContainerRef, ViewChild, ElementRef } from '@angular/core';
+import { BaseRenderDirective } from './base-render.directive';
+import { IGenericStrategyFactory } from '../../strategies/field-strategies/generic-strategy.interface';
+import { CommonRenderService } from '../../services/common-render.service';
+import { FieldRegistryService } from '../../services/field-registry.service';
+import { CommonFormService } from '../../services/common-form.service';
+import { DependencyHandlerService } from '../../services/dependency-handler.service';
+import { UILibraryConfig } from '../../model/configs/ui-library.config';
+import { BaseConfig } from '../../model/configs/base-config';
+import { BaseCustomAttributes } from '../../model/configs/base-config';
+
+// Create a concrete implementation of BaseRenderDirective for testing
+@Component({
+  template: `<div></div>`
+})
+class TestBaseRenderDirective extends BaseRenderDirective {
+  constructor(
+    vcr: ViewContainerRef,
+    config: UILibraryConfig,
+    renderer2: any,
+    fieldRegistry: FieldRegistryService,
+    commonRenderService: CommonRenderService,
+    commonFormService: CommonFormService,
+    dependencyHandlerService: DependencyHandlerService,
+    el: ElementRef,
+    cdr: any
+  ) {
+    super(vcr, config, renderer2, fieldRegistry, commonRenderService, commonFormService, dependencyHandlerService, el, cdr);
+  }
+
+  protected initializeField(strategy: any): void {}
+  protected initializeFields(strategies: any[]): void {}
+  protected renderComponent(field: any): void {}
+}
+
+@Component({
+  template: `<div baseRenderTest></div>`
+})
+class TestHostComponent {
+  @ViewChild(TestBaseRenderDirective) directive!: TestBaseRenderDirective;
+}
+
+describe('BaseRenderDirective', () => {
+  let component: TestHostComponent;
+  let fixture: ComponentFixture<TestHostComponent>;
+  let directive: TestBaseRenderDirective;
+  let mockUILibraryConfig: UILibraryConfig;
+  let commonRenderServiceSpy: jasmine.SpyObj<CommonRenderService>;
+  let fieldRegistryServiceSpy: jasmine.SpyObj<FieldRegistryService>;
+  let commonFormServiceSpy: jasmine.SpyObj<CommonFormService>;
+  let dependencyHandlerServiceSpy: jasmine.SpyObj<DependencyHandlerService>;
+
+  beforeEach(() => {
+    mockUILibraryConfig = { uiLibrary: 'test-library' } as UILibraryConfig;
+
+    commonRenderServiceSpy = jasmine.createSpyObj('CommonRenderService', 
+      ['setUIVariant', 'getComponentForField']);
+    
+    fieldRegistryServiceSpy = jasmine.createSpyObj('FieldRegistryService', ['register']);
+    
+    commonFormServiceSpy = jasmine.createSpyObj('CommonFormService', ['registerFormElement']);
+    
+    dependencyHandlerServiceSpy = jasmine.createSpyObj('DependencyHandlerService', 
+      ['publishEvent']);
+
+    spyOn(console, 'log');
+
+    TestBed.configureTestingModule({
+      declarations: [
+        TestBaseRenderDirective,
+        TestHostComponent
+      ],
+      providers: [
+        { provide: UILibraryConfig, useValue: mockUILibraryConfig },
+        { provide: CommonRenderService, useValue: commonRenderServiceSpy },
+        { provide: FieldRegistryService, useValue: fieldRegistryServiceSpy },
+        { provide: CommonFormService, useValue: commonFormServiceSpy },
+        { provide: DependencyHandlerService, useValue: dependencyHandlerServiceSpy }
+      ]
+    });
+
+    fixture = TestBed.createComponent(TestHostComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    directive = component.directive;
+  });
+
+  it('should create an instance', () => {
+    expect(directive).toBeTruthy();
+  });
+
+  describe('Output EventEmitters', () => {
+    it('should initialize outForms EventEmitter', () => {
+      expect(directive.outForms).toBeTruthy();
+    });
+
+    it('should initialize outClicks EventEmitter', () => {
+      expect(directive.outClicks).toBeTruthy();
+    });
+  });
+
+  describe('getUIVariant', () => {
+    it('should call commonRenderService.setUIVariant with config.uiLibrary', () => {
+      // Setup mock for StrategyRegisterConstant
+      const mockStrategyRegisterConstant = {
+        RegisterComponentTypes: jasmine.createSpy('RegisterComponentTypes'),
+        RegisterGridHeadings: jasmine.createSpy('RegisterGridHeadings'),
+        RegisterGridHeadingActions: jasmine.createSpy('RegisterGridHeadingActions')
+      };
+
+      // Replace the StrategyRegisterConstant in the directive
+      (directive as any).StrategyRegisterConstant = mockStrategyRegisterConstant;
+
+      directive.getUIVariant();
+
+      expect(commonRenderServiceSpy.setUIVariant).toHaveBeenCalledWith(mockUILibraryConfig.uiLibrary);
+      expect(mockStrategyRegisterConstant.RegisterComponentTypes).toHaveBeenCalled();
+      expect(mockStrategyRegisterConstant.RegisterGridHeadings).toHaveBeenCalled();
+      expect(mockStrategyRegisterConstant.RegisterGridHeadingActions).toHaveBeenCalled();
+      expect(directive['factory']).toBeDefined();
+    });
+  });
+
+  describe('updateDependency', () => {
+    it('should call dependencyHandlerService.publishEvent and log to console', () => {
+      const mockField = { id: 'testField' };
+      const mockData = { value: 'testValue' };
+
+      directive['updateDependency'](mockField, mockData);
+
+      expect(dependencyHandlerServiceSpy.publishEvent).toHaveBeenCalledWith(mockField.id, mockData);
+      expect(console.log).toHaveBeenCalledWith('testing??', mockField.id);
+    });
+  });
+
+  describe('getComponent', () => {
+    it('should return componentType from commonRenderService.getComponentForField', async () => {
+      const mockFieldConfig = {
+        componentType: 'test-component',
+        customAttributes: {}
+      } as BaseConfig<BaseCustomAttributes>;
+
+      const mockComponentType = 'TestComponent';
+      commonRenderServiceSpy.getComponentForField.and.resolveTo(mockComponentType);
+
+      const result = await directive['getComponent'](mockFieldConfig);
+
+      expect(commonRenderServiceSpy.getComponentForField).toHaveBeenCalledWith(mockFieldConfig);
+      expect(result).toBe(mockComponentType);
+    });
+
+    it('should throw error if componentType is null', async () => {
+      const mockFieldConfig = {
+        componentType: 'test-component',
+        customAttributes: {}
+      } as BaseConfig<BaseCustomAttributes>;
+
+      commonRenderServiceSpy.getComponentForField.and.resolveTo(null);
+
+      let errorThrown = false;
+      try {
+        await directive['getComponent'](mockFieldConfig);
+      } catch (error) {
+        errorThrown = true;
+        expect(error.message).toContain('Component test-component NOT FOUND');
+      }
+
+      expect(errorThrown).toBe(true);
+    });
+  });
+
+  describe('getFieldSize', () => {
+    it('should return appropriate CSS class based on field config', () => {
+      const mockField = {
+        config: {
+          width: '50%',
+          isHidden: false
+        }
+      };
+
+      const result = directive['getFieldSize'](mockField);
+
+      expect(result).toBe('col-md-50%');
+    });
+
+    it('should return empty string if field is hidden', () => {
+      const mockField = {
+        config: {
+          width: '50%',
+          isHidden: true
+        }
+      };
+
+      const result = directive['getFieldSize'](mockField);
+
+      expect(result).toBe('');
+    });
+  });
+});
