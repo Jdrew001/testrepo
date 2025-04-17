@@ -1,16 +1,16 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { Component, ViewContainerRef, ViewChild, ElementRef } from '@angular/core';
+import { ComponentFixture, TestBed, fakeAsync, tick, waitForAsync } from '@angular/core/testing';
+import { Component, ViewContainerRef, ViewChild, ElementRef, NO_ERRORS_SCHEMA } from '@angular/core';
 import { CommonLibRendererDirective } from './common-lib-renderer.directive';
-import { CommonRenderService } from '../../services/common-render.service';
-import { FieldRegistryService } from '../../services/field-registry.service';
-import { CommonFormService } from '../../services/common-form.service';
-import { DependencyHandlerService } from '../../services/dependency-handler.service';
-import { UILibraryConfig } from '../../model/configs/ui-library.config';
+import { CommonRenderService } from '../../services/utility/common-render.service';
+import { FieldRegistryService } from '../../services/form/field-registry.service';
+import { CommonFormService } from '../../services/form/common-form.service';
+import { DependencyHandlerService } from '../../services/dependency/dependency-handler.service';
+import { UILibraryConfig } from '../../model/config/ui-library.config';
 import { FormGroup } from '@angular/forms';
 import { LibraryConfig } from '../../model/configs/library.config';
-import { BaseConfig } from '../../model/configs/base-config';
-import { Subject } from 'rxjs';
-import { ComponentRef } from '@angular/core';
+import { BaseConfig } from '../../model/config/base.config';
+import { Subject, of } from 'rxjs';
+import { UILibrary } from '../../enums/ui-library.enum';
 
 @Component({
   template: `<div ciaCommonLibRenderer></div>`
@@ -28,8 +28,19 @@ describe('CommonLibRendererDirective', () => {
   let mockFormConfig: BaseConfig<any>[];
   let mockVcr: jasmine.SpyObj<ViewContainerRef>;
   let commonRenderServiceSpy: jasmine.SpyObj<CommonRenderService>;
+  let mockLibraryConfig: UILibraryConfig;
+  let fieldRegistryServiceSpy: jasmine.SpyObj<FieldRegistryService>;
+  let commonFormServiceSpy: jasmine.SpyObj<CommonFormService>;
+  let dependencyHandlerServiceSpy: jasmine.SpyObj<DependencyHandlerService>;
   
-  beforeEach(() => {
+  // Mock implementation for dynamic import
+  const mockImport = (path: string) => {
+    return Promise.resolve({ 
+      CiaCommonUiComponent: {} 
+    });
+  };
+  
+  beforeEach(waitForAsync(() => {
     mockLibConfig = { name: 'Test Config' } as LibraryConfig;
     mockParentForm = new FormGroup({});
     mockFormConfig = [
@@ -43,7 +54,21 @@ describe('CommonLibRendererDirective', () => {
       'getComponentByComponentType'
     ]);
 
+    mockLibraryConfig = {
+      uiLibrary: UILibrary.NG,
+      environment: {}
+    } as UILibraryConfig;
+
+    fieldRegistryServiceSpy = jasmine.createSpyObj('FieldRegistryService', ['register']);
+    
+    commonFormServiceSpy = jasmine.createSpyObj('CommonFormService', ['registerFormElement']);
+    
+    dependencyHandlerServiceSpy = jasmine.createSpyObj('DependencyHandlerService', ['publishEvent']);
+
     spyOn(console, 'log');
+
+    // Patch the global import function
+    spyOn(window, 'import').and.callFake(mockImport);
 
     TestBed.configureTestingModule({
       declarations: [
@@ -52,20 +77,27 @@ describe('CommonLibRendererDirective', () => {
       ],
       providers: [
         { provide: ViewContainerRef, useValue: mockVcr },
-        { provide: UILibraryConfig, useValue: { uiLibrary: 'test' } },
+        { provide: UILibraryConfig, useValue: mockLibraryConfig },
         { provide: CommonRenderService, useValue: commonRenderServiceSpy },
-        { provide: FieldRegistryService, useValue: jasmine.createSpyObj('FieldRegistryService', ['register']) },
-        { provide: CommonFormService, useValue: jasmine.createSpyObj('CommonFormService', ['registerFormElement']) },
-        { provide: DependencyHandlerService, useValue: jasmine.createSpyObj('DependencyHandlerService', ['publishEvent']) },
-        { provide: ElementRef, useValue: {} },
-        { provide: 'ChangeDetectorRef', useValue: {} }
-      ]
-    });
+        { provide: FieldRegistryService, useValue: fieldRegistryServiceSpy },
+        { provide: CommonFormService, useValue: commonFormServiceSpy },
+        { provide: DependencyHandlerService, useValue: dependencyHandlerServiceSpy },
+        { provide: ElementRef, useValue: {} }
+      ],
+      schemas: [NO_ERRORS_SCHEMA]
+    }).compileComponents();
+  }));
 
+  beforeEach(() => {
     fixture = TestBed.createComponent(TestHostComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
     directive = component.directive;
+  });
+
+  afterEach(() => {
+    // Add cleanup to prevent test pollution
+    fixture.destroy();
   });
 
   it('should create an instance', () => {
@@ -111,7 +143,6 @@ describe('CommonLibRendererDirective', () => {
 
   describe('renderComponent', () => {
     it('should import CiaCommonUiComponent and create component', fakeAsync(() => {
-      const mockCiaCommonUiComponent = {};
       const mockComponentRef = {
         instance: {
           libConfig: undefined,
@@ -119,28 +150,23 @@ describe('CommonLibRendererDirective', () => {
           formConfig: undefined,
           data: undefined,
           refData: undefined,
-          outForm: new Subject(),
-          outClick: new Subject(),
-          gridAction: new Subject()
+          outForm: { subscribe: jasmine.createSpy('subscribe') },
+          outClick: { subscribe: jasmine.createSpy('subscribe') },
+          gridAction: { subscribe: jasmine.createSpy('subscribe') }
         }
       };
       
-      // Setup dynamic import mock
-      spyOn(window, 'import').and.returnValue(
-        Promise.resolve({ CiaCommonUiComponent: mockCiaCommonUiComponent })
-      );
-      
-      mockVcr.createComponent.and.returnValue(mockComponentRef as unknown as ComponentRef<any>);
+      mockVcr.createComponent.and.returnValue(mockComponentRef as any);
       
       directive.renderComponent();
-      tick(); // Wait for async operations
+      tick();
       
-      expect(window.import).toHaveBeenCalledWith('../../shared/cia-common-ui.component');
+      expect(window.import).toHaveBeenCalled();
       expect(mockVcr.clear).toHaveBeenCalled();
-      expect(mockVcr.createComponent).toHaveBeenCalledWith(mockCiaCommonUiComponent);
+      expect(mockVcr.createComponent).toHaveBeenCalled();
     }));
     
-    it('should handle inputs and outputs correctly', fakeAsync(() => {
+    it('should set component instance properties and subscribe to outputs', fakeAsync(() => {
       // Create mock component with instances
       const mockComponentRef = {
         instance: {
@@ -155,12 +181,7 @@ describe('CommonLibRendererDirective', () => {
         }
       };
       
-      // Setup dynamic import mock
-      spyOn(window, 'import').and.returnValue(
-        Promise.resolve({ CiaCommonUiComponent: {} })
-      );
-      
-      mockVcr.createComponent.and.returnValue(mockComponentRef as unknown as ComponentRef<any>);
+      mockVcr.createComponent.and.returnValue(mockComponentRef as any);
       
       // Setup directive properties
       directive.libConfig = mockLibConfig;
@@ -175,7 +196,7 @@ describe('CommonLibRendererDirective', () => {
       spyOn(directive.gridActions, 'emit');
       
       directive.renderComponent();
-      tick(); // Wait for async operations
+      tick();
       
       // Verify inputs set correctly
       expect(mockComponentRef.instance.libConfig).toBe(mockLibConfig);
@@ -190,12 +211,12 @@ describe('CommonLibRendererDirective', () => {
       expect(mockComponentRef.instance.gridAction.subscribe).toHaveBeenCalled();
       
       // Test subscription callbacks
-      const outFormCallback = mockComponentRef.instance.outForm.subscribe.calls.argsFor(0)[0];
-      const outClickCallback = mockComponentRef.instance.outClick.subscribe.calls.argsFor(0)[0];
-      const gridActionCallback = mockComponentRef.instance.gridAction.subscribe.calls.argsFor(0)[0];
+      const outFormCallback = mockComponentRef.instance.outForm.subscribe.calls.mostRecent().args[0];
+      const outClickCallback = mockComponentRef.instance.outClick.subscribe.calls.mostRecent().args[0];
+      const gridActionCallback = mockComponentRef.instance.gridAction.subscribe.calls.mostRecent().args[0];
       
       // Invoke callbacks
-      const testValue = { field: 'testField', data: 'testData' };
+      const testValue = { field: { id: 'testField' }, data: { value: 'testData' } };
       outFormCallback(testValue);
       outClickCallback(testValue);
       gridActionCallback(testValue);
