@@ -1,0 +1,84 @@
+import { TestBed } from '@angular/core/testing';
+import { Injector, Type } from '@angular/core';
+import { ServiceLocator } from './service-locator.service';
+
+describe('ServiceLocator', () => {
+  let injector: Injector;
+
+  beforeEach(() => {
+    // Create a mock injector
+    injector = jasmine.createSpyObj('Injector', ['get']);
+    
+    // Reset the static injector
+    ServiceLocator['injector'] = null;
+  });
+
+  it('should be created', () => {
+    const instance = new ServiceLocator();
+    expect(instance).toBeTruthy();
+  });
+
+  it('should throw error when getting service without initializing injector', () => {
+    const serviceType = {} as Type<any>;
+    
+    expect(() => {
+      ServiceLocator.get(serviceType);
+    }).toThrowError(`${serviceType.name} has not been initialized.`);
+  });
+
+  it('should set injector correctly', () => {
+    ServiceLocator.setInjector(injector);
+    expect(ServiceLocator['injector']).toBe(injector);
+  });
+
+  it('should get service from injector when initialized', () => {
+    // Create a mock service
+    const mockService = {};
+    const serviceType = class MockService {} as Type<any>;
+    
+    // Setup the injector mock to return our mock service
+    (injector.get as jasmine.Spy).and.returnValue(mockService);
+    
+    // Set the injector
+    ServiceLocator.setInjector(injector);
+    
+    // Get the service
+    const result = ServiceLocator.get(serviceType);
+    
+    // Verify the injector was called with the service type
+    expect(injector.get).toHaveBeenCalledWith(serviceType);
+    
+    // Verify we got back our mock service
+    expect(result).toBe(mockService);
+  });
+
+  it('should pass through with the same reference', () => {
+    // Create a mock service
+    const mockService = { id: 'original-service' };
+    const serviceType = class MockService {} as Type<any>;
+    
+    // Setup the injector mock to return our mock service
+    (injector.get as jasmine.Spy).and.returnValue(mockService);
+    
+    // Set the injector
+    ServiceLocator.setInjector(injector);
+    
+    // Get the service
+    const result = ServiceLocator.get(serviceType);
+    
+    // Modify the result
+    result.id = 'modified-service';
+    
+    // The modification should be reflected in the original mock service
+    expect(mockService.id).toBe('modified-service');
+  });
+
+  it('should throw error with correct service name', () => {
+    class NamedService {}
+    const serviceType = NamedService as Type<NamedService>;
+    
+    expect(() => {
+      ServiceLocator.get(serviceType);
+    }).toThrowError('NamedService has not been initialized.');
+  });
+});
