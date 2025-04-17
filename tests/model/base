@@ -1,0 +1,170 @@
+import { ComponentType } from '../config.enums';
+import { BaseConfig } from './base-config';
+import { DependencyConfig } from './dependency-config';
+import * as StrategyRegisterConstant from '../strategy-register-constant';
+
+describe('BaseConfig', () => {
+  // Mock for StrategyRegisterConstant
+  let originalStrategyConfigTypeMap;
+  let mockCustomAttributeConstructor;
+
+  beforeEach(() => {
+    // Save original and setup mock for StrategyRegisterConstant
+    originalStrategyConfigTypeMap = StrategyRegisterConstant.strategyConfigTypeMap;
+    mockCustomAttributeConstructor = jasmine.createSpy('customAttributeConstructor').and.returnValue({});
+    
+    StrategyRegisterConstant.strategyConfigTypeMap = {
+      [ComponentType.TEXT]: { customAttribute: mockCustomAttributeConstructor },
+      [ComponentType.DROPDOWN]: { customAttribute: null }
+    };
+
+    // Spy on console.warn
+    spyOn(console, 'warn');
+  });
+
+  afterEach(() => {
+    // Restore original
+    StrategyRegisterConstant.strategyConfigTypeMap = originalStrategyConfigTypeMap;
+  });
+
+  it('should initialize with default values', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      componentType: ComponentType.TEXT
+    });
+
+    expect(config.field).toBe('testField');
+    expect(config.componentType).toBe(ComponentType.TEXT);
+    expect(config.enableTrackChange).toBe(false);
+    expect(config.editable).toBe(false);
+  });
+
+  it('should transform componentType to uppercase', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      componentType: 'text' as ComponentType
+    });
+
+    expect(config.componentType).toBe(ComponentType.TEXT);
+  });
+
+  it('should apply custom attributes when available', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      componentType: ComponentType.TEXT
+    });
+
+    expect(mockCustomAttributeConstructor).toHaveBeenCalled();
+    expect(config.customAttributes).toBeTruthy();
+  });
+
+  it('should log warning when custom attribute constructor is not available', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      componentType: ComponentType.DROPDOWN
+    });
+
+    expect(console.warn).toHaveBeenCalledWith(`Unable to applyCustomAttributes for ${ComponentType.DROPDOWN}`);
+    expect(config.customAttributes).toBeUndefined();
+  });
+
+  it('should override default values with provided config', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      displayName: 'Test Display',
+      columnName: 'test_column',
+      width: 100,
+      isHidden: true,
+      className: 'test-class',
+      validators: ['required'],
+      dependency: [{ field: 'dependentField' } as DependencyConfig<any>],
+      componentType: ComponentType.TEXT,
+      enableTrackChange: true,
+      editable: true,
+      customAttributes: { refGroup: 'testGroup' }
+    });
+
+    expect(config.field).toBe('testField');
+    expect(config.displayName).toBe('Test Display');
+    expect(config.columnName).toBe('test_column');
+    expect(config.width).toBe(100);
+    expect(config.isHidden).toBe(true);
+    expect(config.className).toBe('test-class');
+    expect(config.validators).toEqual(['required']);
+    expect(config.dependency.length).toBe(1);
+    expect(config.dependency[0].field).toBe('dependentField');
+    expect(config.componentType).toBe(ComponentType.TEXT);
+    expect(config.enableTrackChange).toBe(true);
+    expect(config.editable).toBe(true);
+    // Custom attributes are applied by the constructor function, not directly assigned
+    expect(mockCustomAttributeConstructor).toHaveBeenCalled();
+  });
+
+  it('should handle partial config properly', () => {
+    const config = new BaseConfig({
+      field: 'testField',
+      componentType: ComponentType.TEXT,
+      // Only include some properties
+      displayName: 'Test Display',
+      width: 100
+    });
+
+    expect(config.field).toBe('testField');
+    expect(config.displayName).toBe('Test Display');
+    expect(config.width).toBe(100);
+    expect(config.componentType).toBe(ComponentType.TEXT);
+    // Default values for unspecified properties
+    expect(config.isHidden).toBe(false);
+    expect(config.editable).toBe(false);
+    expect(config.enableTrackChange).toBe(false);
+  });
+});
+
+describe('BaseCustomAttributes', () => {
+  it('should initialize with default values', () => {
+    const attributes = new BaseCustomAttributes({}, {} as BaseConfig<any>);
+    
+    expect(attributes.refGroup).toBeNull();
+    expect(attributes.breakRow).toBe(false);
+    expect(attributes.apiToCall).toEqual([]);
+  });
+
+  it('should assign custom config properties', () => {
+    const customConfig = {
+      refGroup: 'testGroup',
+      breakRow: true,
+      filterConfig: [{ filter: 'test' }],
+      rootId: 'root-1'
+    };
+    
+    const baseConfig = { field: 'testField' } as BaseConfig<any>;
+    
+    const attributes = new BaseCustomAttributes(customConfig, baseConfig);
+    
+    expect(attributes.refGroup).toBe('testGroup');
+    expect(attributes.breakRow).toBe(true);
+    expect(attributes.filterConfig).toEqual([{ filter: 'test' }]);
+    expect(attributes.rootId).toBe('root-1');
+  });
+
+  it('should set parentConfig reference', () => {
+    const baseConfig = { field: 'testField' } as BaseConfig<any>;
+    const attributes = new BaseCustomAttributes({}, baseConfig);
+    
+    expect(attributes.parentConfig).toBe(baseConfig);
+  });
+
+  it('should handle null or undefined custom config', () => {
+    const baseConfig = { field: 'testField' } as BaseConfig<any>;
+    
+    // Testing with null
+    const attributes1 = new BaseCustomAttributes(null, baseConfig);
+    expect(attributes1.refGroup).toBeNull();
+    expect(attributes1.parentConfig).toBe(baseConfig);
+    
+    // Testing with undefined
+    const attributes2 = new BaseCustomAttributes(undefined, baseConfig);
+    expect(attributes2.refGroup).toBeNull();
+    expect(attributes2.parentConfig).toBe(baseConfig);
+  });
+});
