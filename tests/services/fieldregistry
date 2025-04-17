@@ -1,0 +1,149 @@
+import { TestBed } from '@angular/core/testing';
+import { FieldRegistryService } from './field-registry.service';
+import { AbstractControl, FormControl, FormGroup } from '@angular/forms';
+import { Subject } from 'rxjs';
+
+describe('FieldRegistryService', () => {
+  let service: FieldRegistryService;
+  let mockStrategy: any;
+  let mockControl: AbstractControl;
+
+  beforeEach(() => {
+    // Create a mock strategy that conforms to IGenericStrategyInterface
+    mockStrategy = {
+      config: {
+        field: 'testField'
+      }
+    };
+
+    mockControl = new FormControl();
+
+    TestBed.configureTestingModule({
+      providers: [FieldRegistryService]
+    });
+
+    service = TestBed.inject(FieldRegistryService);
+  });
+
+  it('should be created', () => {
+    expect(service).toBeTruthy();
+  });
+
+  describe('FormGroup handling', () => {
+    it('should initialize with a new FormGroup', () => {
+      expect(service.formGroup instanceof FormGroup).toBe(true);
+    });
+
+    it('should get and set formGroup correctly', () => {
+      const newFormGroup = new FormGroup({});
+      service.formGroup = newFormGroup;
+      expect(service.formGroup).toBe(newFormGroup);
+    });
+  });
+
+  describe('initializedDatas Subject', () => {
+    it('should initialize a new Subject', () => {
+      expect(service.initializedDatas instanceof Subject).toBe(true);
+    });
+  });
+
+  describe('fields registry', () => {
+    it('should get and set fields registry', () => {
+      const mockRegistry = new Map<string, any>();
+      mockRegistry.set('testField', mockStrategy);
+      
+      service.fields = mockRegistry;
+      expect(service.fields).toBe(mockRegistry);
+      expect(service.fields.size).toBe(1);
+      expect(service.fields.get('testField')).toBe(mockStrategy);
+    });
+  });
+
+  describe('register', () => {
+    it('should add a field to the registry', () => {
+      service.register(mockStrategy);
+      
+      expect(service.fields.size).toBe(1);
+      expect(service.fields.get('testField')).toBe(mockStrategy);
+    });
+  });
+
+  describe('get', () => {
+    it('should retrieve a field from the registry', () => {
+      service.register(mockStrategy);
+      
+      const result = service.get('testField');
+      
+      expect(result).toBe(mockStrategy);
+    });
+
+    it('should return undefined for non-existent field', () => {
+      const result = service.get('nonExistentField');
+      
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe('clearFields', () => {
+    it('should clear the registry', () => {
+      service.register(mockStrategy);
+      expect(service.fields.size).toBe(1);
+      
+      service.clearFields();
+      
+      expect(service.fields.size).toBe(0);
+    });
+  });
+
+  describe('addFormControl', () => {
+    it('should add control to the formGroup when control is provided', () => {
+      spyOn(service.formGroup, 'addControl');
+      
+      service.addFormControl('testId', mockControl);
+      
+      expect(service.formGroup.addControl).toHaveBeenCalledWith('testId', mockControl);
+    });
+
+    it('should not add control when control is null', () => {
+      spyOn(service.formGroup, 'addControl');
+      
+      service.addFormControl('testId', null as any);
+      
+      expect(service.formGroup.addControl).not.toHaveBeenCalled();
+    });
+
+    it('should return the formGroup', () => {
+      const result = service.addFormControl('testId', mockControl);
+      
+      expect(result).toBe(service.formGroup);
+    });
+  });
+
+  describe('addToParentForm', () => {
+    it('should add control to parent form when control is provided', () => {
+      const parentForm = new FormGroup({});
+      spyOn(parentForm, 'addControl');
+      
+      service.addToParentForm('testId', mockControl, parentForm);
+      
+      expect(parentForm.addControl).toHaveBeenCalledWith('testId', mockControl);
+    });
+
+    it('should not add control when control is null', () => {
+      const parentForm = new FormGroup({});
+      spyOn(parentForm, 'addControl');
+      
+      service.addToParentForm('testId', null as any, parentForm);
+      
+      expect(parentForm.addControl).not.toHaveBeenCalled();
+    });
+
+    it('should return the parent form', () => {
+      const parentForm = new FormGroup({});
+      
+      const result = service.addToParentForm('testId', mockControl, parentForm);
+      
+      expect(result).toBe(parentForm);
+    });
+  });
+});
