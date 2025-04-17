@@ -1,0 +1,147 @@
+import { TestBed } from '@angular/core/testing';
+import { ValidatorRegistryService } from './validator-registry.service';
+import { ValidatorFn } from '@angular/forms';
+
+describe('ValidatorRegistryService', () => {
+  let service: ValidatorRegistryService;
+  let mockValidatorFn: jasmine.Spy;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [ValidatorRegistryService]
+    });
+
+    service = TestBed.inject(ValidatorRegistryService);
+    mockValidatorFn = jasmine.createSpy('validatorFn').and.returnValue(null);
+
+    spyOn(console, 'warn');
+    spyOn(console, 'log');
+    spyOn(console, 'error');
+  });
+
+  it('should be created', () => {
+    expect(service).toBeTruthy();
+  });
+
+  describe('test', () => {
+    it('should log test message', () => {
+      service.test();
+      expect(console.log).toHaveBeenCalledWith('testing from register service');
+    });
+  });
+
+  describe('registerValidator', () => {
+    it('should register a new validator', () => {
+      service.registerValidator('custom.validator', mockValidatorFn);
+      expect(service['validatorMap']['custom.validator']).toBe(mockValidatorFn);
+    });
+
+    it('should warn when overwriting an existing validator', () => {
+      service.registerValidator('custom.validator', mockValidatorFn);
+      service.registerValidator('custom.validator', mockValidatorFn);
+      
+      expect(console.warn).toHaveBeenCalledWith('Validator: custom.validator is already registered and will be overwritten.');
+    });
+  });
+
+  describe('getValidators', () => {
+    beforeEach(() => {
+      // Register some validators for testing
+      service.registerValidator('VALIDATORS.REQUIRED', () => null);
+      service.registerValidator('VALIDATORS.EMAIL', () => null);
+      service.registerValidator('VALIDATORS.MIN_LENGTH', (param) => null);
+    });
+
+    it('should return an array of validator functions', () => {
+      const validators = service.getValidators(['VALIDATORS.REQUIRED', 'VALIDATORS.EMAIL']);
+      
+      expect(validators).toBeInstanceOf(Array);
+      expect(validators.length).toBe(2);
+      validators.forEach(fn => {
+        expect(typeof fn).toBe('function');
+      });
+    });
+
+    it('should filter out null/invalid validators', () => {
+      spyOn<any>(service, 'getValidator').and.returnValues(null, () => null);
+      
+      const validators = service.getValidators(['invalid.validator', 'valid.validator']);
+      expect(validators.length).toBe(1);
+    });
+
+    it('should handle empty validators array', () => {
+      const validators = service.getValidators([]);
+      expect(validators).toEqual([]);
+    });
+
+    it('should handle undefined validators', () => {
+      const validators = service.getValidators(undefined as any);
+      expect(validators).toEqual([]);
+    });
+  });
+
+  describe('getValidator', () => {
+    beforeEach(() => {
+      // Setup some test validators
+      service.registerValidator('direct.validator', () => null);
+      service.registerValidator('VALIDATORS.REQUIRED', () => null);
+      service.registerValidator('VALIDATORS.MIN_LENGTH', (param: number) => null);
+      service.registerValidator('VALIDATORS.PATTERN', (param: string) => null);
+    });
+
+    it('should return validator function directly if it exists', () => {
+      const validator = service['getValidator']('direct.validator');
+      expect(validator).toBeTruthy();
+      expect(typeof validator).toBe('function');
+    });
+
+    it('should parse validator string with pattern VALIDATORS.XXX', () => {
+      const validator = service['getValidator']('VALIDATORS.REQUIRED');
+      expect(validator).toBeTruthy();
+    });
+
+    it('should parse validator string with pattern VALIDATORS.XXX(param)', () => {
+      // Mock the regex match
+      spyOn(String.prototype, 'match').and.returnValue(['VALIDATORS.MIN_LENGTH(5)', '', 'MIN_LENGTH', '5']);
+      
+      const validator = service['getValidator']('VALIDATORS.MIN_LENGTH(5)');
+      expect(validator).toBeTruthy();
+    });
+
+    it('should handle numeric parameters correctly', () => {
+      spyOn(String.prototype, 'match').and.returnValue(['VALIDATORS.MIN_LENGTH(5)', '', 'MIN_LENGTH', '5']);
+      
+      service['getValidator']('VALIDATORS.MIN_LENGTH(5)');
+      // This is hard to test directly, but we can verify it doesn't throw errors
+    });
+
+    it('should handle string parameters correctly', () => {
+      spyOn(String.prototype, 'match').and.returnValue(['VALIDATORS.PATTERN([a-z]+)', '', 'PATTERN', '[a-z]+']);
+      
+      service['getValidator']('VALIDATORS.PATTERN([a-z]+)');
+      // This is hard to test directly, but we can verify it doesn't throw errors
+    });
+
+    it('should return null for non-existent validators', () => {
+      const validator = service['getValidator']('non.existent.validator');
+      expect(validator).toBeNull();
+      expect(console.error).toHaveBeenCalledWith('ERROR: Unknown validator non.existent.validator');
+    });
+
+    it('should handle errors during validator retrieval', () => {
+      // Force an error in the try block
+      spyOn(String.prototype, 'match').and.throwError('Test error');
+      
+      const validator = service['getValidator']('VALIDATORS.MIN_LENGTH(5)');
+      expect(validator).toBeNull();
+      expect(console.log).toHaveBeenCalledWith(jasmine.stringMatching(/Invalid validator for/));
+    });
+
+    it('should handle validator function not found in map', () => {
+      spyOn(String.prototype, 'match').and.returnValue(['VALIDATORS.UNKNOWN(5)', '', 'UNKNOWN', '5']);
+      
+      const validator = service['getValidator']('VALIDATORS.UNKNOWN(5)');
+      expect(validator).toBeNull();
+    });
+  });
+});

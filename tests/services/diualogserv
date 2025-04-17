@@ -1,0 +1,116 @@
+import { TestBed } from '@angular/core/testing';
+import { DynamicDialogService } from './dynamic-dialog.service';
+import { DialogService } from './dialog.service';
+import { LibraryConfigService } from './library-config.service';
+import { CommonRenderService } from './common-render.service';
+import { ComponentType } from '../enums/component-type.enum';
+
+describe('DynamicDialogService', () => {
+  let service: DynamicDialogService;
+  let dialogServiceSpy: jasmine.SpyObj<DialogService>;
+  let libraryConfigServiceSpy: jasmine.SpyObj<LibraryConfigService>;
+  let commonRenderServiceSpy: jasmine.SpyObj<CommonRenderService>;
+  let mockLibConfig: any;
+  let mockDialogComponent: any;
+
+  beforeEach(() => {
+    dialogServiceSpy = jasmine.createSpyObj('DialogService', ['open']);
+    libraryConfigServiceSpy = jasmine.createSpyObj('LibraryConfigService', [], {
+      libConfig: { test: 'config' }
+    });
+    commonRenderServiceSpy = jasmine.createSpyObj('CommonRenderService', ['getComponentByComponentType']);
+    mockDialogComponent = { componentType: ComponentType.ADVANCED_DIALOG };
+    mockLibConfig = { test: 'config' };
+
+    TestBed.configureTestingModule({
+      providers: [
+        DynamicDialogService,
+        { provide: DialogService, useValue: dialogServiceSpy },
+        { provide: LibraryConfigService, useValue: libraryConfigServiceSpy },
+        { provide: CommonRenderService, useValue: commonRenderServiceSpy }
+      ]
+    });
+
+    service = TestBed.inject(DynamicDialogService);
+  });
+
+  it('should be created', () => {
+    expect(service).toBeTruthy();
+  });
+
+  it('should get libConfig from LibraryConfigService', () => {
+    expect(service['libConfig']).toEqual(mockLibConfig);
+  });
+
+  describe('openDialog', () => {
+    it('should store dialog config and open dialog', async () => {
+      const dialogConfig = { title: 'Test Dialog' };
+      const data = { testData: true };
+      
+      commonRenderServiceSpy.getComponentByComponentType.and.resolveTo(mockDialogComponent);
+      dialogServiceSpy.open.and.returnValue({ test: 'dialogRef' } as any);
+
+      await service.openDialog(dialogConfig, data);
+
+      expect(service['_dialogConfig']).toEqual(dialogConfig);
+      expect(commonRenderServiceSpy.getComponentByComponentType).toHaveBeenCalledWith(ComponentType.ADVANCED_DIALOG);
+      expect(dialogServiceSpy.open).toHaveBeenCalledWith(
+        mockDialogComponent,
+        {
+          header: dialogConfig.title,
+          width: '75%',
+          data: {
+            libraryConfig: service['libConfig'],
+            data: data,
+            dialogConfig: dialogConfig
+          }
+        }
+      );
+      expect(service.dialogRef).toBeTruthy();
+    });
+
+    it('should throw error if dialog component is null', async () => {
+      const dialogConfig = { title: 'Test Dialog' };
+      const data = { testData: true };
+      
+      commonRenderServiceSpy.getComponentByComponentType.and.resolveTo(null);
+
+      let errorThrown = false;
+      try {
+        await service.openDialog(dialogConfig, data);
+      } catch (e) {
+        errorThrown = true;
+        expect(e.message).toBe('ADVANCED DIALOG IS NULL');
+      }
+
+      expect(errorThrown).toBe(true);
+      expect(service.dialogRef).toBeUndefined();
+      expect(dialogServiceSpy.open).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getDialogComponent', () => {
+    it('should return dialog component from CommonRenderService', async () => {
+      commonRenderServiceSpy.getComponentByComponentType.and.resolveTo(mockDialogComponent);
+      
+      const result = await service['getDialogComponent']();
+      
+      expect(result).toBe(mockDialogComponent);
+      expect(commonRenderServiceSpy.getComponentByComponentType).toHaveBeenCalledWith(ComponentType.ADVANCED_DIALOG);
+    });
+
+    it('should throw error if dialog component is null', async () => {
+      commonRenderServiceSpy.getComponentByComponentType.and.resolveTo(null);
+      
+      let errorThrown = false;
+      try {
+        await service['getDialogComponent']();
+      } catch (e) {
+        errorThrown = true;
+        expect(e.message).toBe('ADVANCED DIALOG IS NULL');
+      }
+      
+      expect(errorThrown).toBe(true);
+    });
+  });
+});

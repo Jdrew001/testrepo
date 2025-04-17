@@ -1,0 +1,95 @@
+import { TestBed } from '@angular/core/testing';
+import { Transformer } from './transformer';
+import { DataType } from '../../../model/request-model/data-type.enum';
+
+describe('Transformer', () => {
+  beforeEach(() => {
+    spyOn(console, 'error');
+  });
+
+  it('should transform ARRAY type correctly', () => {
+    // Undefined or null value should return empty array
+    expect(Transformer.transform(DataType.ARRAY, undefined)).toEqual([]);
+    expect(Transformer.transform(DataType.ARRAY, null)).toEqual([]);
+    
+    // Regular array should return as is
+    const testArray = [1, 2, 3];
+    expect(Transformer.transform(DataType.ARRAY, testArray)).toBe(testArray);
+  });
+
+  it('should transform STRING type correctly', () => {
+    // Undefined or null value should return empty string
+    expect(Transformer.transform(DataType.STRING, undefined)).toBe('');
+    expect(Transformer.transform(DataType.STRING, null)).toBe('');
+    
+    // String value should be returned as is
+    expect(Transformer.transform(DataType.STRING, 'test')).toBe('test');
+    
+    // Number should be converted to string
+    expect(Transformer.transform(DataType.STRING, 123)).toBe('123');
+  });
+
+  it('should transform NUMBER type correctly', () => {
+    // Undefined or null value should return empty string
+    expect(Transformer.transform(DataType.NUMBER, undefined)).toBe('');
+    expect(Transformer.transform(DataType.NUMBER, null)).toBe('');
+    
+    // Number value should be converted to number
+    expect(Transformer.transform(DataType.NUMBER, 123)).toBe(123);
+    
+    // String number should be converted to number
+    expect(Transformer.transform(DataType.NUMBER, '456')).toBe(456);
+    
+    // Invalid number should return 0
+    expect(Transformer.transform(DataType.NUMBER, 'not-a-number')).toBe(0);
+  });
+
+  it('should transform BOOLEAN type correctly', () => {
+    // Undefined or null value should return empty string
+    expect(Transformer.transform(DataType.BOOLEAN, undefined)).toBe('');
+    expect(Transformer.transform(DataType.BOOLEAN, null)).toBe('');
+    
+    // Boolean values should be converted
+    expect(Transformer.transform(DataType.BOOLEAN, true)).toBe(true);
+    expect(Transformer.transform(DataType.BOOLEAN, false)).toBe(false);
+    
+    // String "true"/"false" should be converted to boolean
+    expect(Transformer.transform(DataType.BOOLEAN, 'true')).toBe(true);
+    expect(Transformer.transform(DataType.BOOLEAN, 'false')).toBe(false);
+  });
+
+  it('should transform JSON type correctly', () => {
+    // Undefined or null value should return null
+    expect(Transformer.transform(DataType.JSON, undefined)).toBe(null);
+    expect(Transformer.transform(DataType.JSON, null)).toBe(null);
+    
+    // Object should be returned as is
+    const testObj = { a: 1, b: 2 };
+    expect(Transformer.transform(DataType.JSON, testObj)).toBe(testObj);
+    
+    // String JSON should be parsed
+    const jsonString = '{"a":1,"b":2}';
+    expect(Transformer.transform(DataType.JSON, jsonString)).toEqual({ a: 1, b: 2 });
+    
+    // Invalid JSON should log error and return null
+    Transformer.transform(DataType.JSON, 'invalid-json');
+    expect(console.error).toHaveBeenCalledWith('ERROR INSIDE CATCH BLOCK: Transformer');
+    expect(Transformer.transform(DataType.JSON, 'invalid-json')).toBe(null);
+  });
+
+  it('should handle DEFAULT type by returning value unchanged', () => {
+    const testValues = [123, 'string', true, { a: 1 }, [1, 2, 3], null, undefined];
+    
+    testValues.forEach(value => {
+      expect(Transformer.transform(DataType.DEFAULT, value)).toBe(value);
+    });
+  });
+
+  it('should handle unknown data types by using DEFAULT transformer', () => {
+    // Using a non-existent data type should fall back to default behavior
+    const unknownType = 'UNKNOWN_TYPE' as DataType;
+    
+    const testValue = 'test-value';
+    expect(Transformer.transform(unknownType, testValue)).toBe(testValue);
+  });
+});
