@@ -1,58 +1,214 @@
-// Base spacer value
-$spacer: 1rem;
+// _margin-utilities.scss
 
-// Generate granular spacers map
-$spacers: (
+// Base spacer variable
+$spacer: 1rem !default;
+
+// Define standard Bootstrap-compatible spacers
+$standard-spacers: (
   0: 0,
+  1: $spacer * 0.25,  // 0.25rem
+  2: $spacer * 0.5,   // 0.5rem
+  3: $spacer,         // 1rem
+  4: $spacer * 1.5,   // 1.5rem
+  5: $spacer * 3,     // 3rem
 );
 
-// Add increments of 0.05rem from 0.05 to 0.95
+// Define granular spacers from 0.05 to 0.95 in 0.05 increments
+$fine-spacers: ();
 @for $i from 1 through 19 {
-  $spacers: map-merge(
-    $spacers,
-    (
-      #{"0_" + $i * 5}: #{$i * 0.05}rem
-    )
+  $key: "0_#{$i * 5}";
+  $value: $spacer * ($i * 0.05);
+  $fine-spacers: map-merge(
+    $fine-spacers,
+    ($key: $value)
   );
 }
 
-// Add increments of 0.1rem from 1.0 to 2.0
+// Define spacers from 1.0 to 2.0 in 0.1 increments
+$medium-spacers: ();
 @for $i from 10 through 20 {
-  $spacers: map-merge(
-    $spacers,
-    (
-      #{floor($i / 10) + "_" + $i % 10}: #{$i * 0.1}rem
-    )
+  $whole: floor($i / 10);
+  $decimal: $i % 10;
+  $key: "#{$whole}_#{$decimal}";
+  $value: $spacer * ($i * 0.1);
+  $medium-spacers: map-merge(
+    $medium-spacers,
+    ($key: $value)
   );
 }
 
-// Add increments of 0.5rem from 2.5 to 5.0
+// Define spacers from 2.5 to 5.0 in 0.5 increments
+$large-spacers: ();
 @for $i from 5 through 10 {
-  $spacers: map-merge(
-    $spacers,
-    (
-      #{floor($i / 2) + "_" + ($i % 2) * 5}: #{$i * 0.5}rem
-    )
+  $whole: floor($i / 2);
+  $decimal: ($i % 2) * 5;
+  $key: "#{$whole}_#{$decimal}";
+  $value: $spacer * ($i * 0.5);
+  $large-spacers: map-merge(
+    $large-spacers,
+    ($key: $value)
   );
 }
 
-// Add auto value for margin utilities
-$margin-utilities: map-merge(
-  $spacers,
-  (
-    auto: auto
+// Combine all spacers
+$all-spacers: map-merge(
+  $standard-spacers,
+  map-merge(
+    $fine-spacers,
+    map-merge(
+      $medium-spacers,
+      $large-spacers
+    )
   )
 );
 
-// Generate negative margins
+// Add auto for margin utilities
+$margin-spacers: map-merge(
+  $all-spacers,
+  (auto: auto)
+);
+
+// Generate negative spacers for margins
 $negative-spacers: ();
-@each $key, $value in $spacers {
+@each $key, $value in $all-spacers {
   @if $key != 0 {
     $negative-spacers: map-merge(
       $negative-spacers,
-      (
-        "n#{$key}": -$value
-      )
+      ('n#{$key}': -$value)
     );
   }
 }
+
+// Breakpoints (Bootstrap compatible)
+$grid-breakpoints: (
+  xs: 0,
+  sm: 576px,
+  md: 768px,
+  lg: 992px,
+  xl: 1200px,
+  xxl: 1400px
+) !default;
+
+// Generate margin utilities
+@mixin generate-margins {
+  // All sides margin
+  @each $size, $value in $margin-spacers {
+    .m-#{$size} {
+      margin: $value !important;
+    }
+  }
+
+  // Direction specific margins
+  @each $size, $value in $margin-spacers {
+    .mt-#{$size} {
+      margin-top: $value !important;
+    }
+    .mb-#{$size} {
+      margin-bottom: $value !important;
+    }
+    .ms-#{$size} {
+      margin-left: $value !important;
+    }
+    .me-#{$size} {
+      margin-right: $value !important;
+    }
+    .mx-#{$size} {
+      margin-left: $value !important;
+      margin-right: $value !important;
+    }
+    .my-#{$size} {
+      margin-top: $value !important;
+      margin-bottom: $value !important;
+    }
+  }
+
+  // Negative margins
+  @each $size, $value in $negative-spacers {
+    .m-#{$size} {
+      margin: $value !important;
+    }
+    .mt-#{$size} {
+      margin-top: $value !important;
+    }
+    .mb-#{$size} {
+      margin-bottom: $value !important;
+    }
+    .ms-#{$size} {
+      margin-left: $value !important;
+    }
+    .me-#{$size} {
+      margin-right: $value !important;
+    }
+    .mx-#{$size} {
+      margin-left: $value !important;
+      margin-right: $value !important;
+    }
+    .my-#{$size} {
+      margin-top: $value !important;
+      margin-bottom: $value !important;
+    }
+  }
+
+  // Responsive margins
+  @each $breakpoint, $min-width in $grid-breakpoints {
+    @if $breakpoint != xs {
+      @media (min-width: $min-width) {
+        @each $size, $value in $margin-spacers {
+          .m-#{$breakpoint}-#{$size} {
+            margin: $value !important;
+          }
+          .mt-#{$breakpoint}-#{$size} {
+            margin-top: $value !important;
+          }
+          .mb-#{$breakpoint}-#{$size} {
+            margin-bottom: $value !important;
+          }
+          .ms-#{$breakpoint}-#{$size} {
+            margin-left: $value !important;
+          }
+          .me-#{$breakpoint}-#{$size} {
+            margin-right: $value !important;
+          }
+          .mx-#{$breakpoint}-#{$size} {
+            margin-left: $value !important;
+            margin-right: $value !important;
+          }
+          .my-#{$breakpoint}-#{$size} {
+            margin-top: $value !important;
+            margin-bottom: $value !important;
+          }
+        }
+
+        // Responsive negative margins
+        @each $size, $value in $negative-spacers {
+          .m-#{$breakpoint}-#{$size} {
+            margin: $value !important;
+          }
+          .mt-#{$breakpoint}-#{$size} {
+            margin-top: $value !important;
+          }
+          .mb-#{$breakpoint}-#{$size} {
+            margin-bottom: $value !important;
+          }
+          .ms-#{$breakpoint}-#{$size} {
+            margin-left: $value !important;
+          }
+          .me-#{$breakpoint}-#{$size} {
+            margin-right: $value !important;
+          }
+          .mx-#{$breakpoint}-#{$size} {
+            margin-left: $value !important;
+            margin-right: $value !important;
+          }
+          .my-#{$breakpoint}-#{$size} {
+            margin-top: $value !important;
+            margin-bottom: $value !important;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Generate all margin utilities
+@include generate-margins();
