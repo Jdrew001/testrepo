@@ -1,0 +1,58 @@
+// Base spacer value
+$spacer: 1rem;
+
+// Generate granular spacers map
+$spacers: (
+  0: 0,
+);
+
+// Add increments of 0.05rem from 0.05 to 0.95
+@for $i from 1 through 19 {
+  $spacers: map-merge(
+    $spacers,
+    (
+      #{"0_" + $i * 5}: #{$i * 0.05}rem
+    )
+  );
+}
+
+// Add increments of 0.1rem from 1.0 to 2.0
+@for $i from 10 through 20 {
+  $spacers: map-merge(
+    $spacers,
+    (
+      #{floor($i / 10) + "_" + $i % 10}: #{$i * 0.1}rem
+    )
+  );
+}
+
+// Add increments of 0.5rem from 2.5 to 5.0
+@for $i from 5 through 10 {
+  $spacers: map-merge(
+    $spacers,
+    (
+      #{floor($i / 2) + "_" + ($i % 2) * 5}: #{$i * 0.5}rem
+    )
+  );
+}
+
+// Add auto value for margin utilities
+$margin-utilities: map-merge(
+  $spacers,
+  (
+    auto: auto
+  )
+);
+
+// Generate negative margins
+$negative-spacers: ();
+@each $key, $value in $spacers {
+  @if $key != 0 {
+    $negative-spacers: map-merge(
+      $negative-spacers,
+      (
+        "n#{$key}": -$value
+      )
+    );
+  }
+}
