@@ -8,12 +8,11 @@ import { BaseComponent } from '../base.component';
   styleUrls: ['./ng-chip.component.css']
 })
 export class NgChipComponent extends BaseComponent implements AfterViewInit, OnDestroy {
-  // ViewChild references for DOM manipulation
   @ViewChild('chipInput') chipInput: ElementRef;
   @ViewChild('chipsWrapper') chipsWrapper: ElementRef;
   @ViewChild('chipsContent') chipsContent: ElementRef;
   
-  // Preserve existing getters from the screenshot
+  // Preserve getters from original component
   get config(): any { return this._strategy?.config as BaseConfig<ChipConfig>; }
   get control() { return this._strategy.control }
   get data() { return this._strategy.data; }
@@ -23,14 +22,13 @@ export class NgChipComponent extends BaseComponent implements AfterViewInit, OnD
   get customAttributes() { return this.config?.customAttributes; }
   get refData() { return this._strategy?.refData! }
 
-  // Chip component specific properties
+  // Component state
+  inputValue: string = '';
   isDropdownOpen: boolean = false;
   showOverlay: boolean = false;
-  dropdownItems: any[] = [];
-  inputValue: string = '';
   isOverflowing: boolean = false;
+  dropdownItems: any[] = [];
   
-  // Resize observer to detect changes in container size
   private resizeObserver: ResizeObserver | null = null;
   
   constructor() {
@@ -38,105 +36,218 @@ export class NgChipComponent extends BaseComponent implements AfterViewInit, OnD
   }
   
   ngOnInit(): void {
-    // Preserve existing initialization logic from screenshot
+    // From original component
     if (this.config?.customAttributes?.selectAllRefData) {
       this._strategy.control.patchValue(this.refData);
     }
     
-    // Initialize with empty array if control value is null
+    // Initialize with empty array if null
     if (!this.control.value) {
       this.control.patchValue([]);
     }
   }
   
-  // Methods for chip functionality
+  ngAfterViewInit(): void {
+    // Setup overflow detection
+    this.setupOverflowDetection();
+    
+    // Initial overflow check
+    setTimeout(() => this.checkForOverflow(), 0);
+    
+    // Listen for value changes
+    this.control.valueChanges.subscribe(() => {
+      setTimeout(() => this.checkForOverflow(), 0);
+    });
+  }
+  
+  ngOnDestroy(): void {
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
+  }
+  
+  /**
+   * Setup overflow detection using ResizeObserver
+   */
+  private setupOverflowDetection(): void {
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.checkForOverflow();
+      });
+      
+      if (this.chipsContent?.nativeElement) {
+        this.resizeObserver.observe(this.chipsContent.nativeElement);
+      }
+      
+      if (this.chipsWrapper?.nativeElement) {
+        this.resizeObserver.observe(this.chipsWrapper.nativeElement);
+      }
+    }
+  }
+  
+  /**
+   * Check if chips are overflowing
+   */
+  private checkForOverflow(): void {
+    if (this.chipsContent?.nativeElement && this.chipsWrapper?.nativeElement) {
+      const content = this.chipsContent.nativeElement;
+      const wrapper = this.chipsWrapper.nativeElement;
+      
+      this.isOverflowing = content.scrollWidth > wrapper.clientWidth;
+    }
+  }
+  
+  /**
+   * Window resize handler
+   */
+  @HostListener('window:resize')
+  onResize(): void {
+    this.checkForOverflow();
+  }
+  
+  /**
+   * Add a new chip
+   */
   addItem(value: string): void {
-    if (value && value.trim() && !this.disabled) {
-      // Get current value array or initialize empty array
-      const currentValues = Array.isArray(this.control.value) ? [...this.control.value] : [];
-      
-      // Only add if not already in the list
-      if (!currentValues.includes(value.trim())) {
-        currentValues.push(value.trim());
-        this.control.patchValue(currentValues);
-      }
-      
-      this.inputValue = '';
+    if (!value || !value.trim() || this.disabled) {
+      return;
     }
+    
+    const trimmedValue = value.trim();
+    const currentValues = Array.isArray(this.control.value) ? [...this.control.value] : [];
+    
+    // Only add if not already in the list
+    if (!currentValues.includes(trimmedValue)) {
+      currentValues.push(trimmedValue);
+      this.control.patchValue(currentValues);
+    }
+    
+    // Clear input regardless
+    this.inputValue = '';
+    
+    // Re-focus input
+    setTimeout(() => {
+      if (this.chipInput?.nativeElement) {
+        this.chipInput.nativeElement.focus();
+      }
+    });
   }
   
+  /**
+   * Remove a chip
+   */
   removeItem(item: any): void {
-    if (!this.disabled) {
-      const currentValues = [...this.control.value];
-      const index = currentValues.indexOf(item);
-      
-      if (index !== -1) {
-        currentValues.splice(index, 1);
-        this.control.patchValue(currentValues);
-      }
+    if (this.disabled) {
+      return;
+    }
+    
+    const currentValues = Array.isArray(this.control.value) ? [...this.control.value] : [];
+    const index = currentValues.indexOf(item);
+    
+    if (index !== -1) {
+      currentValues.splice(index, 1);
+      this.control.patchValue(currentValues);
     }
   }
   
+  /**
+   * Clear all chips
+   */
+  clearAll(): void {
+    if (!this.disabled) {
+      this.control.patchValue([]);
+    }
+  }
+  
+  /**
+   * Key handlers
+   */
   onKeyDown(event: KeyboardEvent): void {
-    // Add on Enter or Tab
-    if ((event.key === 'Enter' || event.key === 'Tab') && this.inputValue.trim()) {
+    // Handle Enter key
+    if (event.key === 'Enter' && this.inputValue) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.addItem(this.inputValue);
+    }
+    
+    // Handle Tab key
+    if (event.key === 'Tab' && this.inputValue) {
       event.preventDefault();
       this.addItem(this.inputValue);
     }
     
-    // Remove last item on Backspace if input is empty
-    if (event.key === 'Backspace' && !this.inputValue && Array.isArray(this.control.value) && this.control.value.length > 0) {
+    // Handle Backspace key
+    if (event.key === 'Backspace' && !this.inputValue && 
+        Array.isArray(this.control.value) && this.control.value.length > 0) {
       const currentValues = [...this.control.value];
       currentValues.pop();
       this.control.patchValue(currentValues);
     }
   }
   
-  onInputFocus(): void {
-    // Handle any focus-specific logic
+  /**
+   * Backup handler for Enter key
+   */
+  onEnterKeyUp(): void {
+    if (this.inputValue) {
+      this.addItem(this.inputValue);
+    }
   }
   
+  /**
+   * Focus handler
+   */
+  onInputFocus(): void {
+    // Additional focus behavior if needed
+  }
+  
+  /**
+   * Blur handler
+   */
   onInputBlur(): void {
-    // Add item on blur if there's a value
-    if (this.inputValue.trim()) {
+    // Add item on blur if there's content
+    if (this.inputValue) {
       this.addItem(this.inputValue);
     }
     
-    // Close dropdown with a small delay to allow item selection
+    // Close dropdown with delay to allow selection
     setTimeout(() => {
       this.isDropdownOpen = false;
       this.showOverlay = false;
     }, 150);
   }
   
+  /**
+   * Toggle dropdown
+   */
   toggleDropdown(event: Event): void {
     event.stopPropagation();
     this.isDropdownOpen = !this.isDropdownOpen;
     this.showOverlay = this.isDropdownOpen;
     
-    // Load dropdown items from refData if available
+    // Load dropdown items
     if (this.isDropdownOpen && this.refData) {
+      const currentValues = Array.isArray(this.control.value) ? this.control.value : [];
       this.dropdownItems = this.refData.filter(
-        (item: any) => !this.control.value || !this.control.value.includes(item)
+        (item: any) => !currentValues.includes(item)
       );
     }
   }
   
+  /**
+   * Select dropdown option
+   */
   selectOption(option: any): void {
     this.addItem(option);
     this.isDropdownOpen = false;
     this.showOverlay = false;
   }
   
+  /**
+   * Close overlay
+   */
   closeOverlay(): void {
     this.isDropdownOpen = false;
     this.showOverlay = false;
-  }
-  
-  // Method to clear all chips
-  clearAll(): void {
-    if (!this.disabled) {
-      this.control.patchValue([]);
-    }
   }
 }

@@ -1,4 +1,4 @@
-/* Base container styles */
+/* Main container */
 .chip-container {
     display: flex;
     align-items: center;
@@ -13,7 +13,7 @@
     color: #333;
   }
   
-  /* Chips wrapper */
+  /* Chips container */
   .chips-wrapper {
     display: flex;
     flex-wrap: wrap;
@@ -27,7 +27,7 @@
     position: relative;
   }
   
-  /* Chips inner container - for horizontal scrolling detection */
+  /* Horizontal scrolling container */
   .chips-content {
     display: flex;
     flex-wrap: nowrap;
@@ -50,7 +50,7 @@
     cursor: not-allowed;
   }
   
-  /* Individual chip item */
+  /* Chip item */
   .chip-item {
     display: inline-flex;
     align-items: center;
@@ -69,7 +69,7 @@
     margin-right: 6px;
   }
   
-  /* Remove button for chip */
+  /* Remove button (X) */
   .chip-remove {
     display: inline-flex;
     align-items: center;
@@ -88,7 +88,12 @@
     opacity: 0.8;
   }
   
-  /* Input field - no border, no placeholder visible */
+  .chip-remove[disabled] {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  
+  /* Input field */
   .chip-input {
     flex: 1;
     min-width: 50px;
@@ -100,12 +105,17 @@
     box-shadow: none;
   }
   
+  /* Hide placeholder by default, show on focus */
   .chip-input::placeholder {
-    color: transparent; /* Hide placeholder */
+    color: transparent;
   }
   
   .chip-input:focus::placeholder {
-    color: #aaa; /* Show placeholder on focus */
+    color: #aaa;
+  }
+  
+  .chip-input[disabled] {
+    cursor: not-allowed;
   }
   
   /* +1 Dropdown button */
@@ -124,6 +134,16 @@
     margin: 0 4px;
   }
   
+  .dropdown-toggle:hover {
+    background-color: #d6e5fc;
+  }
+  
+  .dropdown-toggle[disabled] {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
+  
+  /* Dropdown arrow */
   .dropdown-arrow {
     font-size: 8px;
     margin-left: 2px;
@@ -165,6 +185,14 @@
     color: #3b6ecc;
   }
   
+  /* Empty dropdown message */
+  .dropdown-empty {
+    padding: 6px 12px;
+    color: #6c757d;
+    font-style: italic;
+    font-size: 13px;
+  }
+  
   /* Clear button (X outside) */
   .clear-button {
     display: flex;
@@ -184,6 +212,11 @@
     color: #343a40;
   }
   
+  .clear-button[disabled] {
+    color: #adb5bd;
+    cursor: not-allowed;
+  }
+  
   /* Overlay */
   .chip-overlay {
     position: fixed;
@@ -194,4 +227,3 @@
     background-color: rgba(0, 0, 0, 0.3);
     z-index: 1000;
   }
-  

@@ -3,7 +3,7 @@
     
     <div class="chips-wrapper" [attr.disabled]="disabled ? true : null" #chipsWrapper>
       <div class="chips-content" #chipsContent>
-        <!-- Chips items -->
+        <!-- Chip items -->
         <div class="chip-item" *ngFor="let item of control.value">
           <span class="chip-text">{{ item }}</span>
           <button 
@@ -14,15 +14,17 @@
         </div>
         
         <!-- Input field -->
-        <input type="text"
-               class="chip-input"
-               [placeholder]="field?.placeholder || ''"
-               [(ngModel)]="inputValue"
-               (keydown)="onKeyDown($event)"
-               (focus)="onInputFocus()"
-               (blur)="onInputBlur()"
-               [disabled]="disabled"
-               #chipInput>
+        <input 
+          type="text"
+          class="chip-input"
+          [placeholder]="field?.placeholder || ''"
+          [(ngModel)]="inputValue"
+          (keydown)="onKeyDown($event)"
+          (keyup.enter)="onEnterKeyUp()"
+          (focus)="onInputFocus()"
+          (blur)="onInputBlur()"
+          [disabled]="disabled"
+          #chipInput>
         
         <!-- +1 dropdown button - only visible when overflow detected -->
         <button 
@@ -42,6 +44,9 @@
              *ngFor="let option of dropdownItems"
              (click)="selectOption(option)">
           {{ option }}
+        </div>
+        <div class="dropdown-empty" *ngIf="!dropdownItems || !dropdownItems.length">
+          No options available
         </div>
       </div>
     </div>
