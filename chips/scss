@@ -1,0 +1,150 @@
+/* custom-chips.component.scss */
+.custom-chips-container {
+  font-family: Arial, sans-serif;
+  margin-bottom: 15px;
+}
+
+.chips-label {
+  display: inline-block;
+  font-weight: 500;
+  color: #333;
+  margin-right: 10px;
+  min-width: 70px;
+}
+
+.chips-wrapper {
+  display: flex;
+  align-items: stretch;
+}
+
+.chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: 36px;
+  flex: 1;
+  padding: 4px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background-color: #fff;
+  cursor: text;
+  gap: 5px;
+}
+
+.chip-item {
+  display: flex;
+  align-items: center;
+  background-color: #007bff;
+  color: white;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 14px;
+  max-width: 100%;
+}
+
+.chip-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: white;
+  margin-left: 6px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip-input-wrapper {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 100px;
+  position: relative;
+}
+
+.chip-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 4px;
+  font-size: 14px;
+  background: transparent;
+  min-width: 50px;
+}
+
+.dropdown-toggle {
+  display: flex;
+  align-items: center;
+  background-color: #f8f9fa;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  padding: 2px 5px;
+  margin-left: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  height: 22px;
+  line-height: 1;
+}
+
+.dropdown-arrow {
+  font-size: 8px;
+  margin-left: 2px;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1000;
+  min-width: 150px;
+  padding: 5px 0;
+  margin-top: 2px;
+  background-color: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.175);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  clear: both;
+  font-weight: 400;
+  color: #212529;
+  text-align: inherit;
+  white-space: nowrap;
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  
+  &:hover {
+    background-color: #f8f9fa;
+    color: #16181b;
+  }
+}
+
+.clear-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #6c757d;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 8px;
+  cursor: pointer;
+  
+  &:hover {
+    color: #343a40;
+  }
+}

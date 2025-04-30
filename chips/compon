@@ -1,0 +1,104 @@
+// custom-chips.component.ts
+import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
+
+@Component({
+  selector: 'app-custom-chips',
+  templateUrl: './custom-chips.component.html',
+  styleUrls: ['./custom-chips.component.scss']
+})
+export class CustomChipsComponent implements AfterViewInit {
+  @Input() items: string[] = [];
+  @Input() label: string = 'ID:';
+  @Input() placeholder: string = 'Enter ID';
+  @Output() itemsChange = new EventEmitter<string[]>();
+  
+  @ViewChild('chipInput') chipInput: ElementRef;
+  @ViewChild('chipContainer') chipContainer: ElementRef;
+  
+  inputValue: string = '';
+  isDropdownOpen: boolean = false;
+  dropdownOptions: string[] = ['1234', '5678', '9012'];
+
+  constructor() { }
+
+  ngAfterViewInit(): void {
+    // Focus the input when clicking in the container area
+    this.chipContainer.nativeElement.addEventListener('click', (event: MouseEvent) => {
+      if (event.target === this.chipContainer.nativeElement) {
+        this.chipInput.nativeElement.focus();
+      }
+    });
+  }
+
+  addItem(): void {
+    if (this.inputValue.trim()) {
+      const newItems = [...this.items, this.inputValue.trim()];
+      this.items = newItems;
+      this.itemsChange.emit(newItems);
+      this.inputValue = '';
+      this.chipInput.nativeElement.focus();
+    }
+  }
+
+  removeItem(item: string): void {
+    const newItems = this.items.filter(i => i !== item);
+    this.items = newItems;
+    this.itemsChange.emit(newItems);
+  }
+
+  onKeyDown(event: KeyboardEvent): void {
+    // Add item on Enter or Tab
+    if ((event.key === 'Enter' || event.key === 'Tab') && this.inputValue.trim()) {
+      event.preventDefault();
+      this.addItem();
+    }
+    
+    // Remove last item on Backspace if input is empty
+    if (event.key === 'Backspace' && !this.inputValue && this.items.length > 0) {
+      const newItems = [...this.items];
+      newItems.pop();
+      this.items = newItems;
+      this.itemsChange.emit(newItems);
+    }
+  }
+
+  onBlur(): void {
+    // Add item on blur if there's input value
+    if (this.inputValue.trim()) {
+      this.addItem();
+    }
+    // Close dropdown if open
+    this.isDropdownOpen = false;
+  }
+
+  toggleDropdown(event: MouseEvent): void {
+    event.stopPropagation();
+    this.isDropdownOpen = !this.isDropdownOpen;
+    
+    // Close dropdown when clicking outside
+    if (this.isDropdownOpen) {
+      setTimeout(() => {
+        document.addEventListener('click', this.closeDropdown);
+      });
+    }
+  }
+
+  closeDropdown = (): void => {
+    this.isDropdownOpen = false;
+    document.removeEventListener('click', this.closeDropdown);
+  }
+
+  selectOption(option: string): void {
+    if (!this.items.includes(option)) {
+      const newItems = [...this.items, option];
+      this.items = newItems;
+      this.itemsChange.emit(newItems);
+    }
+    this.isDropdownOpen = false;
+  }
+
+  clear(): void {
+    this.items = [];
+    this.itemsChange.emit([]);
+  }
+}

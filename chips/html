@@ -1,0 +1,48 @@
+<!-- custom-chips.component.html -->
+<div class="custom-chips-container">
+  <label *ngIf="label" class="chips-label">{{ label }}</label>
+  <div class="chips-wrapper">
+    <div class="chips-container" #chipContainer>
+      <!-- Render each chip item -->
+      <div class="chip-item" *ngFor="let item of items">
+        <span class="chip-text">{{ item }}</span>
+        <button type="button" class="chip-remove" (click)="removeItem(item)">×</button>
+      </div>
+      
+      <!-- Input field for new chips -->
+      <div class="chip-input-wrapper">
+        <input 
+          #chipInput
+          type="text" 
+          class="chip-input" 
+          [placeholder]="placeholder"
+          [(ngModel)]="inputValue"
+          (keydown)="onKeyDown($event)"
+          (blur)="onBlur()"
+        >
+        
+        <!-- +1 dropdown button inside the chips container -->
+        <button 
+          type="button" 
+          class="dropdown-toggle" 
+          (click)="toggleDropdown($event)"
+        >
+          <span>+1</span>
+          <span class="dropdown-arrow">▼</span>
+        </button>
+        
+        <!-- Dropdown menu -->
+        <div class="dropdown-menu" *ngIf="isDropdownOpen">
+          <div class="dropdown-item" 
+               *ngFor="let option of dropdownOptions"
+               (click)="selectOption(option)">
+            {{ option }}
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Clear button -->
+    <button type="button" class="clear-button" (click)="clear()">×</button>
+  </div>
+</div>
