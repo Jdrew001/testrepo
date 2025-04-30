@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, HostListener } from '@angular/core';
 import { BaseConfig, ChipConfig } from '../../../model';
 import { BaseComponent } from '../base.component';
 
@@ -7,8 +7,13 @@ import { BaseComponent } from '../base.component';
   templateUrl: './ng-chip.component.html',
   styleUrls: ['./ng-chip.component.css']
 })
-export class NgChipComponent extends BaseComponent {
-  // Keep the getters exactly as in the screenshot
+export class NgChipComponent extends BaseComponent implements AfterViewInit, OnDestroy {
+  // ViewChild references for DOM manipulation
+  @ViewChild('chipInput') chipInput: ElementRef;
+  @ViewChild('chipsWrapper') chipsWrapper: ElementRef;
+  @ViewChild('chipsContent') chipsContent: ElementRef;
+  
+  // Preserve existing getters from the screenshot
   get config(): any { return this._strategy?.config as BaseConfig<ChipConfig>; }
   get control() { return this._strategy.control }
   get data() { return this._strategy.data; }
@@ -18,73 +23,120 @@ export class NgChipComponent extends BaseComponent {
   get customAttributes() { return this.config?.customAttributes; }
   get refData() { return this._strategy?.refData! }
 
-  // Component state variables
+  // Chip component specific properties
   isDropdownOpen: boolean = false;
   showOverlay: boolean = false;
+  dropdownItems: any[] = [];
   inputValue: string = '';
+  isOverflowing: boolean = false;
+  
+  // Resize observer to detect changes in container size
+  private resizeObserver: ResizeObserver | null = null;
   
   constructor() {
     super();
   }
   
   ngOnInit(): void {
-    // Preserved from the screenshot
+    // Preserve existing initialization logic from screenshot
     if (this.config?.customAttributes?.selectAllRefData) {
       this._strategy.control.patchValue(this.refData);
     }
+    
+    // Initialize with empty array if control value is null
+    if (!this.control.value) {
+      this.control.patchValue([]);
+    }
   }
   
-  // Add an item (chip)
-  add(value: string): void {
-    if (value && value.trim()) {
+  // Methods for chip functionality
+  addItem(value: string): void {
+    if (value && value.trim() && !this.disabled) {
+      // Get current value array or initialize empty array
       const currentValues = Array.isArray(this.control.value) ? [...this.control.value] : [];
+      
+      // Only add if not already in the list
       if (!currentValues.includes(value.trim())) {
         currentValues.push(value.trim());
         this.control.patchValue(currentValues);
       }
+      
       this.inputValue = '';
     }
   }
   
-  // Remove an item (chip)
-  remove(value: string): void {
-    const currentValues = Array.isArray(this.control.value) ? [...this.control.value] : [];
-    const index = currentValues.indexOf(value);
-    if (index > -1) {
-      currentValues.splice(index, 1);
+  removeItem(item: any): void {
+    if (!this.disabled) {
+      const currentValues = [...this.control.value];
+      const index = currentValues.indexOf(item);
+      
+      if (index !== -1) {
+        currentValues.splice(index, 1);
+        this.control.patchValue(currentValues);
+      }
+    }
+  }
+  
+  onKeyDown(event: KeyboardEvent): void {
+    // Add on Enter or Tab
+    if ((event.key === 'Enter' || event.key === 'Tab') && this.inputValue.trim()) {
+      event.preventDefault();
+      this.addItem(this.inputValue);
+    }
+    
+    // Remove last item on Backspace if input is empty
+    if (event.key === 'Backspace' && !this.inputValue && Array.isArray(this.control.value) && this.control.value.length > 0) {
+      const currentValues = [...this.control.value];
+      currentValues.pop();
       this.control.patchValue(currentValues);
     }
   }
   
-  // Handle keyboard events
-  onKeyDown(event: KeyboardEvent): void {
-    if ((event.key === 'Enter' || event.key === 'Tab') && this.inputValue.trim()) {
-      event.preventDefault();
-      this.add(this.inputValue);
-    }
+  onInputFocus(): void {
+    // Handle any focus-specific logic
   }
   
-  // Toggle dropdown menu
+  onInputBlur(): void {
+    // Add item on blur if there's a value
+    if (this.inputValue.trim()) {
+      this.addItem(this.inputValue);
+    }
+    
+    // Close dropdown with a small delay to allow item selection
+    setTimeout(() => {
+      this.isDropdownOpen = false;
+      this.showOverlay = false;
+    }, 150);
+  }
+  
   toggleDropdown(event: Event): void {
     event.stopPropagation();
     this.isDropdownOpen = !this.isDropdownOpen;
     this.showOverlay = this.isDropdownOpen;
+    
+    // Load dropdown items from refData if available
+    if (this.isDropdownOpen && this.refData) {
+      this.dropdownItems = this.refData.filter(
+        (item: any) => !this.control.value || !this.control.value.includes(item)
+      );
+    }
   }
   
-  // Close dropdown and overlay
-  closeDropdown(): void {
+  selectOption(option: any): void {
+    this.addItem(option);
     this.isDropdownOpen = false;
     this.showOverlay = false;
   }
   
-  // Select an item from dropdown
-  selectFromDropdown(value: string): void {
-    this.add(value);
-    this.closeDropdown();
+  closeOverlay(): void {
+    this.isDropdownOpen = false;
+    this.showOverlay = false;
   }
   
-  // Clear all chips
+  // Method to clear all chips
   clearAll(): void {
-    this.control.patchValue([]);
+    if (!this.disabled) {
+      this.control.patchValue([]);
+    }
   }
 }

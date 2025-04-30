@@ -1,92 +1,132 @@
-/* Main wrapper */
-.chip-wrapper {
+/* Base container styles */
+.chip-container {
     display: flex;
     align-items: center;
     width: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   
-  /* Container for chips and input */
-  .chip-container {
+  /* Label style */
+  .label-text {
+    margin-right: 10px;
+    font-weight: 500;
+    color: #333;
+  }
+  
+  /* Chips wrapper */
+  .chips-wrapper {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    min-height: 36px;
     flex: 1;
-    min-height: 34px;
-    padding: 0 8px;
-    border: 1px solid #ced4da;
+    padding: 4px;
+    border: 1px solid #cad8ee;
     border-radius: 4px;
-    background: white;
+    background-color: #fff;
+    position: relative;
   }
   
-  /* Individual chip */
-  .chip {
+  /* Chips inner container - for horizontal scrolling detection */
+  .chips-content {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
-    background-color: #007bff;
-    color: white;
-    border-radius: 4px;
-    padding: 3px 8px;
-    margin: 4px 4px 4px 0;
-    font-size: 14px;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
   }
   
-  /* X button inside chip */
+  /* Hide scrollbar */
+  .chips-content::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Disabled state */
+  .chips-wrapper[disabled] {
+    background-color: #e9ecef;
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  
+  /* Individual chip item */
+  .chip-item {
+    display: inline-flex;
+    align-items: center;
+    background-color: #e7f0fd;
+    color: #3b6ecc;
+    border-radius: 4px;
+    padding: 4px 8px 4px 12px;
+    font-size: 14px;
+    margin: 2px 4px 2px 0;
+    white-space: nowrap;
+    border: 1px solid #cad8ee;
+  }
+  
+  /* Chip text */
+  .chip-text {
+    margin-right: 6px;
+  }
+  
+  /* Remove button for chip */
   .chip-remove {
-    margin-left: 6px;
-    background: none;
-    border: none;
-    color: white;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    background: none;
+    border: none;
+    color: #3b6ecc;
     padding: 0;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-left: 6px;
   }
   
-  /* Input container */
-  .chip-input-container {
-    display: flex;
-    align-items: center;
-    flex: 1;
-    min-width: 100px;
+  .chip-remove:hover {
+    opacity: 0.8;
   }
   
-  /* Input field - no border as requested */
+  /* Input field - no border, no placeholder visible */
   .chip-input {
     flex: 1;
+    min-width: 50px;
     border: none;
     outline: none;
-    padding: 6px 4px;
+    padding: 4px 8px;
     font-size: 14px;
     background: transparent;
     box-shadow: none;
   }
   
-  /* Dropdown container */
-  .dropdown {
-    position: relative;
-    display: inline-block;
+  .chip-input::placeholder {
+    color: transparent; /* Hide placeholder */
   }
   
-  /* +1 button */
-  .dropdown-button {
-    display: flex;
+  .chip-input:focus::placeholder {
+    color: #aaa; /* Show placeholder on focus */
+  }
+  
+  /* +1 Dropdown button */
+  .dropdown-toggle {
+    display: inline-flex;
     align-items: center;
-    background-color: #f8f9fa;
-    border: 1px solid #ced4da;
+    justify-content: center;
+    background-color: #e7f0fd;
+    color: #3b6ecc;
+    border: 1px solid #cad8ee;
     border-radius: 4px;
     padding: 2px 6px;
     font-size: 12px;
+    white-space: nowrap;
     cursor: pointer;
-    margin-right: 4px;
+    margin: 0 4px;
   }
   
-  /* Dropdown caret */
-  .dropdown-caret {
+  .dropdown-arrow {
     font-size: 8px;
-    margin-left: 3px;
+    margin-left: 2px;
   }
   
   /* Dropdown menu */
@@ -96,45 +136,62 @@
     right: 0;
     z-index: 1001;
     min-width: 150px;
-    background-color: white;
-    border: 1px solid rgba(0,0,0,.15);
-    border-radius: 4px;
-    box-shadow: 0 2px 5px rgba(0,0,0,.175);
+    padding: 5px 0;
     margin-top: 2px;
+    background-color: #fff;
+    border: 1px solid #cad8ee;
+    border-radius: 4px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    max-height: 200px;
+    overflow-y: auto;
   }
   
-  /* Dropdown items */
+  /* Dropdown item */
   .dropdown-item {
+    display: block;
+    width: 100%;
     padding: 6px 12px;
+    font-weight: 400;
+    color: #212529;
+    text-align: left;
+    white-space: nowrap;
+    background-color: transparent;
+    border: 0;
     cursor: pointer;
-    font-size: 14px;
   }
   
   .dropdown-item:hover {
-    background-color: #f8f9fa;
+    background-color: #e7f0fd;
+    color: #3b6ecc;
   }
   
-  /* Clear (X) button */
+  /* Clear button (X outside) */
   .clear-button {
-    background: none;
-    border: none;
-    color: #6c757d;
-    font-size: 18px;
-    cursor: pointer;
-    padding: 0 8px;
     display: flex;
     align-items: center;
     justify-content: center;
+    background: none;
+    border: none;
+    color: #6c757d;
+    font-size: 16px;
+    font-weight: bold;
+    padding: 0 8px;
+    cursor: pointer;
+    margin-left: 4px;
+  }
+  
+  .clear-button:hover {
+    color: #343a40;
   }
   
   /* Overlay */
-  .overlay {
+  .chip-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0,0,0,0.3);
+    background-color: rgba(0, 0, 0, 0.3);
     z-index: 1000;
   }
   

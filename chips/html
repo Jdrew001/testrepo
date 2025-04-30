@@ -1,41 +1,58 @@
-<div class="chip-wrapper" [ngClass]="className">
-    <div class="chip-container">
-      <!-- Chips Items -->
-      <div *ngFor="let item of control.value" class="chip">
-        <span>{{item}}</span>
-        <button type="button" class="chip-remove" (click)="remove(item)">×</button>
+<div class="chip-container" [ngClass]="className">
+    <div class="label-text" *ngIf="field?.label">{{ field.label || 'GAU ID:' }}</div>
+    
+    <div class="chips-wrapper" [attr.disabled]="disabled ? true : null" #chipsWrapper>
+      <div class="chips-content" #chipsContent>
+        <!-- Chips items -->
+        <div class="chip-item" *ngFor="let item of control.value">
+          <span class="chip-text">{{ item }}</span>
+          <button 
+            type="button" 
+            class="chip-remove" 
+            (click)="removeItem(item)" 
+            [disabled]="disabled">X</button>
+        </div>
+        
+        <!-- Input field -->
+        <input type="text"
+               class="chip-input"
+               [placeholder]="field?.placeholder || ''"
+               [(ngModel)]="inputValue"
+               (keydown)="onKeyDown($event)"
+               (focus)="onInputFocus()"
+               (blur)="onInputBlur()"
+               [disabled]="disabled"
+               #chipInput>
+        
+        <!-- +1 dropdown button - only visible when overflow detected -->
+        <button 
+          *ngIf="isOverflowing"
+          type="button"
+          class="dropdown-toggle"
+          (click)="toggleDropdown($event)"
+          [disabled]="disabled">
+          <span>+1</span>
+          <span class="dropdown-arrow">▼</span>
+        </button>
       </div>
       
-      <!-- Input Field - borderless as requested -->
-      <div class="chip-input-container">
-        <input 
-          type="text" 
-          class="chip-input" 
-          [placeholder]="field?.placeholder || 'Enter value'" 
-          [(ngModel)]="inputValue"
-          (keydown)="onKeyDown($event)"
-        >
-        
-        <!-- +1 Dropdown inside chip container -->
-        <div class="dropdown">
-          <button type="button" class="dropdown-button" (click)="toggleDropdown($event)">
-            <span>+1</span>
-            <i class="dropdown-caret">▼</i>
-          </button>
-          
-          <!-- Dropdown Menu -->
-          <div class="dropdown-menu" *ngIf="isDropdownOpen">
-            <div class="dropdown-item" *ngFor="let item of refData" (click)="selectFromDropdown(item)">
-              {{item}}
-            </div>
-          </div>
+      <!-- Dropdown menu -->
+      <div class="dropdown-menu" *ngIf="isDropdownOpen">
+        <div class="dropdown-item" 
+             *ngFor="let option of dropdownItems"
+             (click)="selectOption(option)">
+          {{ option }}
         </div>
       </div>
     </div>
     
-    <!-- X (clear) button -->
-    <button type="button" class="clear-button" (click)="clearAll()">×</button>
+    <!-- Clear button outside -->
+    <button 
+      type="button" 
+      class="clear-button" 
+      (click)="clearAll()" 
+      [disabled]="disabled || !control.value || !control.value.length">X</button>
     
     <!-- Overlay -->
-    <div class="overlay" *ngIf="showOverlay" (click)="closeDropdown()"></div>
+    <div class="chip-overlay" *ngIf="showOverlay" (click)="closeOverlay()"></div>
   </div>
