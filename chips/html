@@ -25,31 +25,32 @@
           (blur)="onInputBlur()"
           [disabled]="disabled"
           #chipInput>
-        
-        <!-- +1 dropdown button - only visible when overflow detected -->
-        <button 
-          *ngIf="isOverflowing"
-          type="button"
-          class="dropdown-toggle"
-          (click)="toggleDropdown($event)"
-          [disabled]="disabled">
-          <span>+1</span>
-          <span class="dropdown-arrow">▼</span>
-        </button>
       </div>
-      
-      <!-- Dropdown menu -->
-      <div class="dropdown-menu" *ngIf="isDropdownOpen">
-        <div class="dropdown-item" 
-             *ngFor="let option of dropdownItems"
-             (click)="selectOption(option)">
-          {{ option }}
+  
+      <!-- PrimeNG overlay reference element -->
+      <p-overlayPanel #op>
+        <div class="overlay-content">
+          <div class="dropdown-item" 
+               *ngFor="let option of dropdownItems"
+               (click)="selectOptionFromOverlay(option, op)">
+            {{ option }}
+          </div>
+          <div class="dropdown-empty" *ngIf="!dropdownItems || !dropdownItems.length">
+            No options available
+          </div>
         </div>
-        <div class="dropdown-empty" *ngIf="!dropdownItems || !dropdownItems.length">
-          No options available
-        </div>
-      </div>
+      </p-overlayPanel>
     </div>
+    
+    <!-- +1 dropdown button that opens PrimeNG overlay -->
+    <button *ngIf="isOverflowing"
+            type="button"
+            class="dropdown-toggle"
+            (click)="showOverlayPanel($event, op)"
+            [disabled]="disabled">
+      <span>+1</span>
+      <span class="dropdown-arrow">▼</span>
+    </button>
     
     <!-- Clear button outside -->
     <button 
@@ -57,7 +58,4 @@
       class="clear-button" 
       (click)="clearAll()" 
       [disabled]="disabled || !control.value || !control.value.length">X</button>
-    
-    <!-- Overlay -->
-    <div class="chip-overlay" *ngIf="showOverlay" (click)="closeOverlay()"></div>
   </div>

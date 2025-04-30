@@ -118,7 +118,7 @@
     cursor: not-allowed;
   }
   
-  /* +1 Dropdown button */
+  /* +1 Dropdown button - positioned outside the container */
   .dropdown-toggle {
     display: inline-flex;
     align-items: center;
@@ -132,6 +132,7 @@
     white-space: nowrap;
     cursor: pointer;
     margin: 0 4px;
+    height: 24px;
   }
   
   .dropdown-toggle:hover {
@@ -149,28 +150,28 @@
     margin-left: 2px;
   }
   
-  /* Dropdown menu */
-  .dropdown-menu {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    z-index: 1001;
-    min-width: 150px;
-    padding: 5px 0;
-    margin-top: 2px;
-    background-color: #fff;
+  /* Styling for PrimeNG overlay */
+  :host ::ng-deep .p-overlaypanel {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     border: 1px solid #cad8ee;
     border-radius: 4px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  :host ::ng-deep .p-overlaypanel .p-overlaypanel-content {
+    padding: 0;
+  }
+  
+  /* Overlay content styles */
+  .overlay-content {
     max-height: 200px;
     overflow-y: auto;
   }
   
-  /* Dropdown item */
+  /* Dropdown item in overlay */
   .dropdown-item {
     display: block;
     width: 100%;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-weight: 400;
     color: #212529;
     text-align: left;
@@ -187,7 +188,7 @@
   
   /* Empty dropdown message */
   .dropdown-empty {
-    padding: 6px 12px;
+    padding: 8px 12px;
     color: #6c757d;
     font-style: italic;
     font-size: 13px;
@@ -215,15 +216,4 @@
   .clear-button[disabled] {
     color: #adb5bd;
     cursor: not-allowed;
-  }
-  
-  /* Overlay */
-  .chip-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.3);
-    z-index: 1000;
   }

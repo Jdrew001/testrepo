@@ -1,6 +1,7 @@
 import { Component, ViewChild, ElementRef, AfterViewInit, OnDestroy, HostListener } from '@angular/core';
 import { BaseConfig, ChipConfig } from '../../../model';
 import { BaseComponent } from '../base.component';
+import { OverlayPanel } from 'primeng/overlaypanel';
 
 @Component({
   selector: 'cia-ng-chip',
@@ -93,7 +94,42 @@ export class NgChipComponent extends BaseComponent implements AfterViewInit, OnD
       const content = this.chipsContent.nativeElement;
       const wrapper = this.chipsWrapper.nativeElement;
       
-      this.isOverflowing = content.scrollWidth > wrapper.clientWidth;
+      // Only consider it overflowing if we have items AND they're overflowing
+      this.isOverflowing = content.scrollWidth > wrapper.clientWidth && 
+                          Array.isArray(this.control.value) && 
+                          this.control.value.length > 0;
+
+      // Update dropdown items whenever overflow state changes
+      if (this.isOverflowing) {
+        this.updateHiddenItems();
+      }
+    }
+  }
+  
+  /**
+   * Update the list of items that are hidden due to overflow
+   */
+  private updateHiddenItems(): void {
+    if (!this.chipsContent?.nativeElement || !this.control?.value) {
+      return;
+    }
+    
+    // Get all chip elements
+    const chipElements = this.chipsContent.nativeElement.querySelectorAll('.chip-item');
+    const containerRight = this.chipsContent.nativeElement.getBoundingClientRect().right;
+    
+    // Find items that are partially or fully outside the visible area
+    this.dropdownItems = [];
+    const currentValues = this.control.value;
+    
+    for (let i = 0; i < chipElements.length; i++) {
+      const chip = chipElements[i];
+      const chipRight = chip.getBoundingClientRect().right;
+      
+      // If chip extends beyond container, add to hidden items
+      if (chipRight > containerRight && i < currentValues.length) {
+        this.dropdownItems.push(currentValues[i]);
+      }
     }
   }
   
@@ -218,36 +254,32 @@ export class NgChipComponent extends BaseComponent implements AfterViewInit, OnD
   }
   
   /**
-   * Toggle dropdown
+   * Show the PrimeNG overlay panel
    */
-  toggleDropdown(event: Event): void {
+  showOverlayPanel(event: Event, overlayPanel: any): void {
     event.stopPropagation();
-    this.isDropdownOpen = !this.isDropdownOpen;
-    this.showOverlay = this.isDropdownOpen;
     
-    // Load dropdown items
-    if (this.isDropdownOpen && this.refData) {
-      const currentValues = Array.isArray(this.control.value) ? this.control.value : [];
-      this.dropdownItems = this.refData.filter(
-        (item: any) => !currentValues.includes(item)
-      );
+    // Update items before showing panel
+    this.updateHiddenItems();
+    
+    // Show the overlay panel
+    if (this.dropdownItems.length > 0) {
+      overlayPanel.toggle(event);
     }
   }
   
   /**
-   * Select dropdown option
+   * Select an option from the overlay
    */
-  selectOption(option: any): void {
+  selectOptionFromOverlay(option: any, overlayPanel: any): void {
     this.addItem(option);
-    this.isDropdownOpen = false;
-    this.showOverlay = false;
-  }
-  
-  /**
-   * Close overlay
-   */
-  closeOverlay(): void {
-    this.isDropdownOpen = false;
-    this.showOverlay = false;
+    overlayPanel.hide();
+    
+    // Re-focus the input after selection
+    setTimeout(() => {
+      if (this.chipInput?.nativeElement) {
+        this.chipInput.nativeElement.focus();
+      }
+    });
   }
 }
