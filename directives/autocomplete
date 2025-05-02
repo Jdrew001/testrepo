@@ -1,4 +1,4 @@
-import { Directive, Input, Self, OnInit, OnDestroy } from '@angular/core';
+import { Directive, Input, Self, OnInit, OnDestroy, ElementRef } from '@angular/core';
 import { NgControl } from '@angular/forms';
 import { AutoComplete } from 'primeng/autocomplete';
 import { Subscription } from 'rxjs';
@@ -13,6 +13,7 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   private originalOnSelect: Function | null = null;
   private originalOnModelChange: Function | null = null;
   private valueChangesSubscription: Subscription | null = null;
+  private isV17: boolean = false;
 
   constructor(
     @Self() private autoComplete: AutoComplete,
@@ -20,15 +21,21 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    // Detect version - v17 uses signals
+    this.isV17 = typeof (this.autoComplete as any)['modelValue'] === 'function';
+    
     // Store the original methods
-    this.originalOnSelect = this.autoComplete.onSelect;
-    this.originalOnModelChange = this.autoComplete.onModelChange;
+    this.originalOnSelect = this.autoComplete.onSelect as Function;
+    this.originalOnModelChange = this.autoComplete.onModelChange as Function;
 
     // Override the onSelect method
     this.autoComplete.onSelect = (event: any) => {
+      // Get the value/option from the event
+      const option = this.isV17 ? event.value : event;
+      
       if (this.returnObject) {
         // When returning object, pass the full object as value
-        this.ngControl.control?.setValue(event);
+        this.ngControl.control?.setValue(option);
         
         // Call the original onSelect with the event
         if (this.originalOnSelect) {
@@ -58,13 +65,72 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
     };
 
     // Subscribe to value changes from the form control
-    this.valueChangesSubscription = this.ngControl.valueChanges?.subscribe(value => {
-      if (this.returnObject && value && this.objectField) {
-        // Set the input field value to display the field value if an object is received
-        this.autoComplete.inputFieldValue = this.autoComplete.resolveFieldData(value);
-        this.autoComplete.updateInputField();
+    if (this.ngControl.valueChanges) {
+      this.valueChangesSubscription = this.ngControl.valueChanges.subscribe(value => {
+        if (this.returnObject && value) {
+          // Update the display text when an object is received
+          this.updateInputText(value);
+        }
+      });
+    }
+  }
+
+  /**
+   * Updates the input field text based on the provided object value
+   */
+  private updateInputText(value: any): void {
+    if (!value) return;
+    
+    // Get the field to display
+    const fieldToUse = this.objectField || this.autoComplete.field || 'label';
+    
+    if (this.isV17) {
+      // In v17, we need to update the input element directly
+      const inputEl = this.getInputElement();
+      if (inputEl) {
+        inputEl.value = this.resolveFieldData(value, fieldToUse);
       }
-    });
+    } else {
+      // In v16, we can update the inputFieldValue and call updateInputField
+      (this.autoComplete as any)['inputFieldValue'] = this.resolveFieldData(value, fieldToUse);
+      if (typeof (this.autoComplete as any)['updateInputField'] === 'function') {
+        (this.autoComplete as any)['updateInputField']();
+      }
+    }
+  }
+
+  /**
+   * Gets the input element from either version of the component
+   */
+  private getInputElement(): HTMLInputElement | null {
+    // Try to get the input element reference
+    const inputRef = (this.autoComplete as any)['inputEL'] as ElementRef | undefined;
+    return inputRef?.nativeElement || null;
+  }
+
+  /**
+   * Gets value from an object by field name
+   */
+  private resolveFieldData(object: any, field: string): string {
+    if (!object || !field) {
+      return '';
+    }
+
+    if (field.indexOf('.') === -1) {
+      return object[field] !== undefined ? object[field] : '';
+    }
+    
+    const fields = field.split('.');
+    let value = object;
+    
+    for (let i = 0, len = fields.length; i < len; ++i) {
+      if (value == null) {
+        return '';
+      }
+      value = value[fields[i]];
+    }
+    
+    return value !== undefined ? value : '';
   }
 
   ngOnDestroy(): void {
