@@ -1,0 +1,85 @@
+import { Directive, Input, Self, OnInit, OnDestroy } from '@angular/core';
+import { NgControl } from '@angular/forms';
+import { AutoComplete } from 'primeng/autocomplete';
+import { Subscription } from 'rxjs';
+
+@Directive({
+  selector: 'p-autoComplete[returnObject]',
+})
+export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
+  @Input() returnObject: boolean = true;
+  @Input() objectField: string = '';
+
+  private originalOnSelect: Function | null = null;
+  private originalOnModelChange: Function | null = null;
+  private valueChangesSubscription: Subscription | null = null;
+
+  constructor(
+    @Self() private autoComplete: AutoComplete,
+    @Self() private ngControl: NgControl
+  ) {}
+
+  ngOnInit(): void {
+    // Store the original methods
+    this.originalOnSelect = this.autoComplete.onSelect;
+    this.originalOnModelChange = this.autoComplete.onModelChange;
+
+    // Override the onSelect method
+    this.autoComplete.onSelect = (event: any) => {
+      if (this.returnObject) {
+        // When returning object, pass the full object as value
+        this.ngControl.control?.setValue(event);
+        
+        // Call the original onSelect with the event
+        if (this.originalOnSelect) {
+          this.originalOnSelect.call(this.autoComplete, event);
+        }
+      } else {
+        // Use the original behavior
+        if (this.originalOnSelect) {
+          this.originalOnSelect.call(this.autoComplete, event);
+        }
+      }
+    };
+
+    // Override the onModelChange method
+    this.autoComplete.onModelChange = (value: any) => {
+      if (this.returnObject) {
+        // Use the value directly if it's already an object
+        if (this.originalOnModelChange) {
+          this.originalOnModelChange.call(this.autoComplete, value);
+        }
+      } else {
+        // Use the original behavior
+        if (this.originalOnModelChange) {
+          this.originalOnModelChange.call(this.autoComplete, value);
+        }
+      }
+    };
+
+    // Subscribe to value changes from the form control
+    this.valueChangesSubscription = this.ngControl.valueChanges?.subscribe(value => {
+      if (this.returnObject && value && this.objectField) {
+        // Set the input field value to display the field value if an object is received
+        this.autoComplete.inputFieldValue = this.autoComplete.resolveFieldData(value);
+        this.autoComplete.updateInputField();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    // Clean up the subscription
+    if (this.valueChangesSubscription) {
+      this.valueChangesSubscription.unsubscribe();
+    }
+    
+    // Restore original methods if needed
+    if (this.originalOnSelect) {
+      this.autoComplete.onSelect = this.originalOnSelect;
+    }
+    
+    if (this.originalOnModelChange) {
+      this.autoComplete.onModelChange = this.originalOnModelChange;
+    }
+  }
+}
