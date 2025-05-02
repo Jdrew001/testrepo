@@ -1,0 +1,21 @@
+<!-- typeahead.component.html -->
+<div class="typeahead-container">
+  <p-autoComplete 
+    [(ngModel)]="inputValue"
+    [suggestions]="suggestions"
+    (completeMethod)="completeMethod.emit({query: $event.query, fieldId: fieldId})"
+    (onSelect)="onSelectItem($event)"
+    [minLength]="minLength"
+    [dropdown]="dropdown"
+    [placeholder]="placeholder"
+    (onClear)="clearSelection()">
+  </p-autoComplete>
+  
+  <!-- Hidden display for selected value -->
+  <div *ngIf="selectedValue" class="selected-value">
+    <span class="selection-chip">
+      {{ selectedValue }}
+      <button class="clear-button" (click)="clearSelection()">×</button>
+    </span>
+  </div>
+</div>

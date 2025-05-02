@@ -1,0 +1,89 @@
+// typeahead.component.ts
+import { Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+
+@Component({
+  selector: 'app-typeahead',
+  templateUrl: './typeahead.component.html',
+  styleUrls: ['./typeahead.component.css'],
+  providers: [
+    {
+      provide: NG_VALUE_ACCESSOR,
+      multi: true,
+      useExisting: TypeaheadComponent
+    }
+  ]
+})
+export class TypeaheadComponent implements OnInit, ControlValueAccessor {
+  @Input() suggestions: string[] = [];
+  @Input() fieldId: string = '';
+  @Input() placeholder: string = 'Search...';
+  @Input() minLength: number = 1;
+  @Input() dropdown: boolean = true;
+  
+  @Output() completeMethod = new EventEmitter<{query: string, fieldId: string}>();
+  @Output() selectionChange = new EventEmitter<{value: string, fieldId: string}>();
+  
+  // Internal value for the component
+  private _value: string = '';
+  // Internal value for the selected item (hidden from display)
+  private _selectedValue: string = '';
+  
+  // Display value - this is what shows in the input field
+  inputValue: string = '';
+  
+  // For ControlValueAccessor
+  onChange: any = () => {};
+  onTouched: any = () => {};
+  
+  ngOnInit(): void {}
+  
+  // Called when the user types in the input field
+  onInputChange(event: any): void {
+    this.inputValue = event.target.value;
+    this._value = event.target.value;
+    this.onChange(this._selectedValue); // The model value remains the selected value
+    this.completeMethod.emit({ query: event.target.value, fieldId: this.fieldId });
+  }
+  
+  // Called when an item is selected from the dropdown
+  onSelectItem(value: string): void {
+    this._selectedValue = value; // Store the selected value internally
+    this.inputValue = ''; // Clear the input field after selection
+    this.onChange(this._selectedValue); // Update the model with selected value
+    this.selectionChange.emit({ value: value, fieldId: this.fieldId });
+  }
+  
+  // ControlValueAccessor methods
+  writeValue(value: any): void {
+    if (value !== undefined && value !== null) {
+      this._selectedValue = value;
+      // Do not update inputValue to keep the field clear
+    }
+  }
+  
+  registerOnChange(fn: any): void {
+    this.onChange = fn;
+  }
+  
+  registerOnTouched(fn: any): void {
+    this.onTouched = fn;
+  }
+  
+  setDisabledState?(isDisabled: boolean): void {
+    // Implementation for disabled state if needed
+  }
+  
+  // Clear the selected value
+  clearSelection(): void {
+    this._selectedValue = '';
+    this.inputValue = '';
+    this.onChange(this._selectedValue);
+    this.selectionChange.emit({ value: '', fieldId: this.fieldId });
+  }
+  
+  // Get the currently selected value
+  get selectedValue(): string {
+    return this._selectedValue;
+  }
+}
