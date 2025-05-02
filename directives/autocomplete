@@ -12,7 +12,6 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
 
   private valueChangesSubscription: Subscription | null = null;
   private isV17: boolean = false;
-  private originalSelectFn: ((event: any) => void) | null = null;
 
   constructor(
     @Self() private autoComplete: AutoComplete,
@@ -23,11 +22,21 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
     // Detect version - v17 uses signals
     this.isV17 = typeof (this.autoComplete as any)['modelValue'] === 'function';
     
-    // For v16, we need to create a hook into the original 'selectItem' method
-    if (!this.isV17) {
-      this.hookIntoV16SelectItem();
-    } else {
-      this.hookIntoV17OptionSelect();
+    // Handle single select mode
+    if (!this.autoComplete.multiple) {
+      if (!this.isV17) {
+        this.hookIntoV16SelectItem();
+      } else {
+        this.hookIntoV17OptionSelect();
+      }
+    } 
+    // Handle multiple select mode
+    else {
+      if (!this.isV17) {
+        this.hookIntoV16MultipleSelectItem();
+      } else {
+        this.hookIntoV17MultipleOptionSelect();
+      }
     }
 
     // Subscribe to value changes from the form control
@@ -35,21 +44,21 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
       this.valueChangesSubscription = this.ngControl.valueChanges.subscribe(value => {
         if (this.returnObject && value) {
           // Update the display text when an object is received
-          this.updateInputText(value);
+          this.updateInputField(value);
         }
       });
     }
   }
 
   /**
-   * Hook into the V16 selectItem method
+   * Hook into the V16 selectItem method for single selection
    */
   private hookIntoV16SelectItem(): void {
     const originalSelectItem = (this.autoComplete as any)['selectItem'];
     if (typeof originalSelectItem === 'function') {
       (this.autoComplete as any)['selectItem'] = (event: any, option: any) => {
         if (this.returnObject) {
-          // When returning object, pass the full object as value
+          // Pass the full object as value
           this.ngControl.control?.setValue(option);
           
           // Also update the AutoComplete's value for internal consistency
@@ -63,14 +72,46 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   }
 
   /**
-   * Hook into the V17 onOptionSelect method
+   * Hook into the V16 selectItem method for multiple selection
+   */
+  private hookIntoV16MultipleSelectItem(): void {
+    const originalSelectItem = (this.autoComplete as any)['selectItem'];
+    if (typeof originalSelectItem === 'function') {
+      (this.autoComplete as any)['selectItem'] = (event: any, option: any) => {
+        if (this.returnObject) {
+          // Get current value (array)
+          const currentValue = this.ngControl.control?.value || [];
+          
+          // Check if option is already selected
+          const isSelected = currentValue.some((val: any) => 
+            this.isOptionEqual(val, option)
+          );
+          
+          if (!isSelected) {
+            // Add option to array
+            const newValue = [...currentValue, option];
+            this.ngControl.control?.setValue(newValue);
+            
+            // Also update the AutoComplete's value for internal consistency
+            (this.autoComplete as any).value = newValue;
+          }
+        }
+        
+        // Call the original method
+        originalSelectItem.call(this.autoComplete, event, option);
+      };
+    }
+  }
+
+  /**
+   * Hook into the V17 onOptionSelect method for single selection
    */
   private hookIntoV17OptionSelect(): void {
     const originalOnOptionSelect = (this.autoComplete as any)['onOptionSelect'];
     if (typeof originalOnOptionSelect === 'function') {
       (this.autoComplete as any)['onOptionSelect'] = (event: any, option: any) => {
         if (this.returnObject) {
-          // When returning object, pass the full object as value
+          // Pass the full object as value
           this.ngControl.control?.setValue(option);
         }
         
@@ -81,12 +122,60 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   }
 
   /**
-   * Updates the input field text based on the provided object value
+   * Hook into the V17 onOptionSelect method for multiple selection
    */
-  private updateInputText(value: any): void {
-    if (!value) return;
+  private hookIntoV17MultipleOptionSelect(): void {
+    const originalOnOptionSelect = (this.autoComplete as any)['onOptionSelect'];
+    if (typeof originalOnOptionSelect === 'function') {
+      (this.autoComplete as any)['onOptionSelect'] = (event: any, option: any) => {
+        if (this.returnObject) {
+          // Get current value (array)
+          const currentValue = this.ngControl.control?.value || [];
+          
+          // Check if option is already selected
+          const isSelected = currentValue.some((val: any) => 
+            this.isOptionEqual(val, option)
+          );
+          
+          if (!isSelected) {
+            // Add option to array
+            const newValue = [...currentValue, option];
+            this.ngControl.control?.setValue(newValue);
+          }
+        }
+        
+        // Call the original method
+        originalOnOptionSelect.call(this.autoComplete, event, option);
+      };
+    }
+  }
+
+  /**
+   * Check if two options are equal
+   */
+  private isOptionEqual(option1: any, option2: any): boolean {
+    // Use dataKey if defined
+    if (this.autoComplete.dataKey) {
+      return option1[this.autoComplete.dataKey] === option2[this.autoComplete.dataKey];
+    }
     
-    // Get the field to display
+    // Otherwise do a simple equality check
+    return option1 === option2;
+  }
+
+  /**
+   * Updates the input field display based on the provided value
+   */
+  private updateInputField(value: any): void {
+    if (!value) return;
+
+    // Handle multiple selection mode (array)
+    if (this.autoComplete.multiple && Array.isArray(value)) {
+      // In multiple mode, the display is handled by PrimeNG's template
+      return;
+    }
+    
+    // Handle single selection mode (object)
     const fieldToUse = this.objectField || this.autoComplete.field || 'label';
     
     if (this.isV17) {
