@@ -12,6 +12,7 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
 
   private valueChangesSubscription: Subscription | null = null;
   private isV17: boolean = false;
+  private processingSelection: boolean = false;
 
   constructor(
     @Self() private autoComplete: AutoComplete,
@@ -22,27 +23,19 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
     // Detect version - v17 uses signals
     this.isV17 = typeof (this.autoComplete as any)['modelValue'] === 'function';
     
-    // Handle single select mode
-    if (!this.autoComplete.multiple) {
-      if (!this.isV17) {
-        this.hookIntoV16SelectItem();
-      } else {
-        this.hookIntoV17OptionSelect();
-      }
+    // For v16
+    if (!this.isV17) {
+      this.hookIntoV16ModelChange();
     } 
-    // Handle multiple select mode
+    // For v17
     else {
-      if (!this.isV17) {
-        this.hookIntoV16MultipleSelectItem();
-      } else {
-        this.hookIntoV17MultipleOptionSelect();
-      }
+      this.hookIntoV17ModelChange();
     }
 
     // Subscribe to value changes from the form control
     if (this.ngControl.valueChanges) {
       this.valueChangesSubscription = this.ngControl.valueChanges.subscribe(value => {
-        if (this.returnObject && value) {
+        if (this.returnObject && value && !this.processingSelection) {
           // Update the display text when an object is received
           this.updateInputField(value);
         }
@@ -51,116 +44,144 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   }
 
   /**
-   * Hook into the V16 selectItem method for single selection
+   * Hook into V16's onModelChange method
    */
-  private hookIntoV16SelectItem(): void {
-    const originalSelectItem = (this.autoComplete as any)['selectItem'];
-    if (typeof originalSelectItem === 'function') {
-      (this.autoComplete as any)['selectItem'] = (event: any, option: any) => {
-        if (this.returnObject) {
-          // Pass the full object as value
-          this.ngControl.control?.setValue(option);
+  private hookIntoV16ModelChange(): void {
+    const originalOnModelChange = this.autoComplete.onModelChange;
+    
+    this.autoComplete.onModelChange = (value: any) => {
+      if (this.returnObject) {
+        this.processingSelection = true;
+        try {
+          // Let the original method update the internal state
+          originalOnModelChange(value);
           
-          // Also update the AutoComplete's value for internal consistency
-          (this.autoComplete as any).value = option;
-        }
-        
-        // Call the original method
-        originalSelectItem.call(this.autoComplete, event, option);
-      };
-    }
-  }
-
-  /**
-   * Hook into the V16 selectItem method for multiple selection
-   */
-  private hookIntoV16MultipleSelectItem(): void {
-    const originalSelectItem = (this.autoComplete as any)['selectItem'];
-    if (typeof originalSelectItem === 'function') {
-      (this.autoComplete as any)['selectItem'] = (event: any, option: any) => {
-        if (this.returnObject) {
-          // Get current value (array)
-          const currentValue = this.ngControl.control?.value || [];
-          
-          // Check if option is already selected
-          const isSelected = currentValue.some((val: any) => 
-            this.isOptionEqual(val, option)
-          );
-          
-          if (!isSelected) {
-            // Add option to array
-            const newValue = [...currentValue, option];
-            this.ngControl.control?.setValue(newValue);
-            
-            // Also update the AutoComplete's value for internal consistency
-            (this.autoComplete as any).value = newValue;
+          // Now update our form control with the object(s) instead of string values
+          if (this.autoComplete.multiple) {
+            if (Array.isArray(value)) {
+              // Process the array to ensure we have original objects
+              this.handleMultipleSelection(value);
+            }
+          } else {
+            // For single selection, keep the full object
+            this.ngControl.control?.setValue(
+              this.getSingleObjectValue(value),
+              { emitEvent: false }
+            );
           }
+        } finally {
+          this.processingSelection = false;
         }
-        
-        // Call the original method
-        originalSelectItem.call(this.autoComplete, event, option);
-      };
-    }
+      } else {
+        // Original behavior for string values
+        originalOnModelChange(value);
+      }
+    };
   }
 
   /**
-   * Hook into the V17 onOptionSelect method for single selection
+   * Hook into V17's onModelChange method
    */
-  private hookIntoV17OptionSelect(): void {
-    const originalOnOptionSelect = (this.autoComplete as any)['onOptionSelect'];
-    if (typeof originalOnOptionSelect === 'function') {
-      (this.autoComplete as any)['onOptionSelect'] = (event: any, option: any) => {
-        if (this.returnObject) {
-          // Pass the full object as value
-          this.ngControl.control?.setValue(option);
-        }
-        
-        // Call the original method
-        originalOnOptionSelect.call(this.autoComplete, event, option);
-      };
-    }
-  }
-
-  /**
-   * Hook into the V17 onOptionSelect method for multiple selection
-   */
-  private hookIntoV17MultipleOptionSelect(): void {
-    const originalOnOptionSelect = (this.autoComplete as any)['onOptionSelect'];
-    if (typeof originalOnOptionSelect === 'function') {
-      (this.autoComplete as any)['onOptionSelect'] = (event: any, option: any) => {
-        if (this.returnObject) {
-          // Get current value (array)
-          const currentValue = this.ngControl.control?.value || [];
+  private hookIntoV17ModelChange(): void {
+    const originalOnModelChange = this.autoComplete.onModelChange;
+    
+    this.autoComplete.onModelChange = (value: any) => {
+      if (this.returnObject) {
+        this.processingSelection = true;
+        try {
+          // Let the original method update the internal state
+          originalOnModelChange(value);
           
-          // Check if option is already selected
-          const isSelected = currentValue.some((val: any) => 
-            this.isOptionEqual(val, option)
-          );
-          
-          if (!isSelected) {
-            // Add option to array
-            const newValue = [...currentValue, option];
-            this.ngControl.control?.setValue(newValue);
+          // Now update our form control with the object(s) instead of string values
+          if (this.autoComplete.multiple) {
+            if (Array.isArray(value)) {
+              // Process the array to ensure we have original objects
+              this.handleMultipleSelection(value);
+            }
+          } else {
+            // For single selection, keep the full object
+            this.ngControl.control?.setValue(
+              this.getSingleObjectValue(value),
+              { emitEvent: false }
+            );
           }
+        } finally {
+          this.processingSelection = false;
         }
-        
-        // Call the original method
-        originalOnOptionSelect.call(this.autoComplete, event, option);
-      };
-    }
+      } else {
+        // Original behavior for string values
+        originalOnModelChange(value);
+      }
+    };
   }
-
+  
   /**
-   * Check if two options are equal
+   * Handle multiple selection by ensuring we have objects, not strings
    */
-  private isOptionEqual(option1: any, option2: any): boolean {
-    // Use dataKey if defined
-    if (this.autoComplete.dataKey) {
-      return option1[this.autoComplete.dataKey] === option2[this.autoComplete.dataKey];
+  private handleMultipleSelection(value: any[]): void {
+    // Get the suggestions which contain the full objects
+    const suggestions = this.getSuggestions();
+    if (!suggestions || !suggestions.length) return;
+    
+    // Map any string values to their corresponding objects
+    const objectValues = value.map(item => {
+      // If the item is already an object, return it as is
+      if (typeof item === 'object' && item !== null) {
+        return item;
+      }
+      
+      // If it's a string, find the corresponding object in suggestions
+      const stringValue = String(item);
+      const fieldToUse = this.autoComplete.field || 'label';
+      
+      // Find the matching object in suggestions
+      const matchingObject = suggestions.find(suggestion => {
+        const suggestionValue = this.resolveFieldData(suggestion, fieldToUse);
+        return suggestionValue === stringValue;
+      });
+      
+      return matchingObject || item;
+    });
+    
+    // Update the form control with the array of objects
+    this.ngControl.control?.setValue(objectValues, { emitEvent: false });
+  }
+  
+  /**
+   * Handle single selection by ensuring we have an object, not a string
+   */
+  private getSingleObjectValue(value: any): any {
+    // If value is already an object, return it
+    if (typeof value === 'object' && value !== null) {
+      return value;
     }
     
-    // Otherwise do a simple equality check
-    return option1 === option2;
+    // If it's a string, find the corresponding object
+    const suggestions = this.getSuggestions();
+    if (!suggestions || !suggestions.length) return value;
+    
+    const stringValue = String(value);
+    const fieldToUse = this.autoComplete.field || 'label';
+    
+    // Find the matching object
+    const matchingObject = suggestions.find(suggestion => {
+      const suggestionValue = this.resolveFieldData(suggestion, fieldToUse);
+      return suggestionValue === stringValue;
+    });
+    
+    return matchingObject || value;
+  }
+  
+  /**
+   * Get current suggestions from the autocomplete component
+   */
+  private getSuggestions(): any[] {
+    if (this.isV17) {
+      return (this.autoComplete as any)._suggestions ? 
+        (this.autoComplete as any)._suggestions() : [];
+    } else {
+      return (this.autoComplete as any)._suggestions || [];
+    }
   }
 
   /**
