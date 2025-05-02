@@ -10,10 +10,9 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
   @Input() returnObject: boolean = true;
   @Input() objectField: string = '';
 
-  private originalOnSelect: Function | null = null;
-  private originalOnModelChange: Function | null = null;
   private valueChangesSubscription: Subscription | null = null;
   private isV17: boolean = false;
+  private originalSelectFn: ((event: any) => void) | null = null;
 
   constructor(
     @Self() private autoComplete: AutoComplete,
@@ -24,45 +23,12 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
     // Detect version - v17 uses signals
     this.isV17 = typeof (this.autoComplete as any)['modelValue'] === 'function';
     
-    // Store the original methods
-    this.originalOnSelect = this.autoComplete.onSelect as Function;
-    this.originalOnModelChange = this.autoComplete.onModelChange as Function;
-
-    // Override the onSelect method
-    this.autoComplete.onSelect = (event: any) => {
-      // Get the value/option from the event
-      const option = this.isV17 ? event.value : event;
-      
-      if (this.returnObject) {
-        // When returning object, pass the full object as value
-        this.ngControl.control?.setValue(option);
-        
-        // Call the original onSelect with the event
-        if (this.originalOnSelect) {
-          this.originalOnSelect.call(this.autoComplete, event);
-        }
-      } else {
-        // Use the original behavior
-        if (this.originalOnSelect) {
-          this.originalOnSelect.call(this.autoComplete, event);
-        }
-      }
-    };
-
-    // Override the onModelChange method
-    this.autoComplete.onModelChange = (value: any) => {
-      if (this.returnObject) {
-        // Use the value directly if it's already an object
-        if (this.originalOnModelChange) {
-          this.originalOnModelChange.call(this.autoComplete, value);
-        }
-      } else {
-        // Use the original behavior
-        if (this.originalOnModelChange) {
-          this.originalOnModelChange.call(this.autoComplete, value);
-        }
-      }
-    };
+    // For v16, we need to create a hook into the original 'selectItem' method
+    if (!this.isV17) {
+      this.hookIntoV16SelectItem();
+    } else {
+      this.hookIntoV17OptionSelect();
+    }
 
     // Subscribe to value changes from the form control
     if (this.ngControl.valueChanges) {
@@ -72,6 +38,45 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
           this.updateInputText(value);
         }
       });
+    }
+  }
+
+  /**
+   * Hook into the V16 selectItem method
+   */
+  private hookIntoV16SelectItem(): void {
+    const originalSelectItem = (this.autoComplete as any)['selectItem'];
+    if (typeof originalSelectItem === 'function') {
+      (this.autoComplete as any)['selectItem'] = (event: any, option: any) => {
+        if (this.returnObject) {
+          // When returning object, pass the full object as value
+          this.ngControl.control?.setValue(option);
+          
+          // Also update the AutoComplete's value for internal consistency
+          (this.autoComplete as any).value = option;
+        }
+        
+        // Call the original method
+        originalSelectItem.call(this.autoComplete, event, option);
+      };
+    }
+  }
+
+  /**
+   * Hook into the V17 onOptionSelect method
+   */
+  private hookIntoV17OptionSelect(): void {
+    const originalOnOptionSelect = (this.autoComplete as any)['onOptionSelect'];
+    if (typeof originalOnOptionSelect === 'function') {
+      (this.autoComplete as any)['onOptionSelect'] = (event: any, option: any) => {
+        if (this.returnObject) {
+          // When returning object, pass the full object as value
+          this.ngControl.control?.setValue(option);
+        }
+        
+        // Call the original method
+        originalOnOptionSelect.call(this.autoComplete, event, option);
+      };
     }
   }
 
@@ -137,15 +142,6 @@ export class AutoCompleteObjectValueDirective implements OnInit, OnDestroy {
     // Clean up the subscription
     if (this.valueChangesSubscription) {
       this.valueChangesSubscription.unsubscribe();
-    }
-    
-    // Restore original methods if needed
-    if (this.originalOnSelect) {
-      this.autoComplete.onSelect = this.originalOnSelect;
-    }
-    
-    if (this.originalOnModelChange) {
-      this.autoComplete.onModelChange = this.originalOnModelChange;
     }
   }
 }
