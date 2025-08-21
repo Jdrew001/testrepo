@@ -1,6 +1,6 @@
-import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2 } from '@angular/core';
+import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2, NgZone } from '@angular/core';
 import { Table } from 'primeng/table';
-import { Subject } from 'rxjs';
+import { Subject, interval } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 @Directive({
@@ -10,13 +10,14 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
   private headerCheckboxClickListener?: (event: Event) => void;
-  private headerCheckboxChangeListener?: (event: Event) => void;
-  private mutationObserver?: MutationObserver;
+  private headerCheckboxMonitorInterval?: any;
+  private lastKnownHeaderState = { checked: false, indeterminate: false };
 
   constructor(
     @Host() private table: Table,
     private element: ElementRef,
-    private renderer: Renderer2
+    private renderer: Renderer2,
+    private ngZone: NgZone
   ) {}
 
   ngOnInit() {
@@ -32,268 +33,229 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         });
     }
 
-    // Override updateHeaderCheckboxState if it exists
-    this.overrideHeaderCheckboxBehavior();
+    // Override PrimeNG's header checkbox toggle completely
+    this.overridePrimeNGBehavior();
   }
 
   ngAfterViewInit() {
-    // Setup header checkbox override and initial state
+    // Initial setup
     setTimeout(() => {
-      this.interceptHeaderCheckbox();
+      this.setupHeaderCheckboxControl();
       this.updateHeaderCheckboxState();
-      // Ensure disabled checkboxes are never checked
       this.uncheckDisabledCheckboxes();
-      // Start observing for DOM changes that might disable the header
-      this.observeHeaderCheckbox();
+      
+      // Start aggressive monitoring to keep header enabled
+      this.startHeaderMonitoring();
     }, 100);
 
-    // Handle table updates, pagination, sorting
-    if (this.table.onPage) {
-      this.table.onPage
-        .pipe(takeUntil(this.destroy$))
-        .subscribe(() => {
+    // Handle table updates
+    [this.table.onPage, this.table.onSort, this.table.onFilter].forEach(event => {
+      if (event) {
+        event.pipe(takeUntil(this.destroy$)).subscribe(() => {
           setTimeout(() => {
-            this.interceptHeaderCheckbox();
+            this.setupHeaderCheckboxControl();
             this.updateHeaderCheckboxState();
             this.uncheckDisabledCheckboxes();
           }, 100);
         });
-    }
-
-    if (this.table.onSort) {
-      this.table.onSort
-        .pipe(takeUntil(this.destroy$))
-        .subscribe(() => {
-          setTimeout(() => {
-            this.interceptHeaderCheckbox();
-            this.updateHeaderCheckboxState();
-            this.uncheckDisabledCheckboxes();
-          }, 100);
-        });
-    }
-
-    // Also listen for filter changes if filtering is used
-    if (this.table.onFilter) {
-      this.table.onFilter
-        .pipe(takeUntil(this.destroy$))
-        .subscribe(() => {
-          setTimeout(() => {
-            this.interceptHeaderCheckbox();
-            this.updateHeaderCheckboxState();
-            this.uncheckDisabledCheckboxes();
-          }, 100);
-        });
-    }
+      }
+    });
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
     
+    // Clean up monitoring
+    if (this.headerCheckboxMonitorInterval) {
+      clearInterval(this.headerCheckboxMonitorInterval);
+    }
+    
     // Clean up listeners
     this.removeHeaderCheckboxListeners();
-    
-    // Clean up mutation observer
-    if (this.mutationObserver) {
-      this.mutationObserver.disconnect();
+  }
+
+  private overridePrimeNGBehavior() {
+    // Completely override PrimeNG's toggle all functionality
+    if (this.table) {
+      // Override the toggleAll method if it exists
+      const originalToggleAll = (this.table as any).toggleAll;
+      if (originalToggleAll) {
+        (this.table as any).toggleAll = (event: any) => {
+          // Don't call the original, handle it ourselves
+          this.handleCustomToggleAll();
+        };
+      }
+
+      // Override onHeaderCheckboxToggle emission
+      if (this.table.onHeaderCheckboxToggle) {
+        const originalEmit = this.table.onHeaderCheckboxToggle.emit;
+        this.table.onHeaderCheckboxToggle.emit = (event: any) => {
+          // Prevent default behavior completely
+          if (event) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            event.stopImmediatePropagation?.();
+          }
+          // Handle our custom logic instead
+          this.handleCustomToggleAll();
+        };
+      }
+
+      // Also override the internal updateSelection method
+      const originalUpdateSelection = (this.table as any).updateSelection;
+      if (originalUpdateSelection) {
+        (this.table as any).updateSelection = (event: any, data: any) => {
+          // Only allow individual row selections
+          if (event?.target && !event.target.closest('thead')) {
+            originalUpdateSelection.call(this.table, event, data);
+          }
+        };
+      }
     }
   }
 
-  private observeHeaderCheckbox() {
-    // Create a mutation observer to watch for disabled attribute changes
-    this.mutationObserver = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.type === 'attributes' && mutation.attributeName === 'disabled') {
-          const target = mutation.target as HTMLInputElement;
-          if (target && target.type === 'checkbox' && target.closest('thead')) {
-            // If header checkbox gets disabled, immediately re-enable it
-            if (target.disabled) {
-              target.disabled = false;
-              const pCheckbox = target.closest('.p-checkbox');
+  private startHeaderMonitoring() {
+    // Aggressively monitor and fix header checkbox state every 100ms
+    this.ngZone.runOutsideAngular(() => {
+      this.headerCheckboxMonitorInterval = setInterval(() => {
+        const headerCheckbox = this.getHeaderCheckbox();
+        if (headerCheckbox) {
+          // Force enable if disabled
+          if (headerCheckbox.disabled) {
+            this.ngZone.run(() => {
+              headerCheckbox.disabled = false;
+              const pCheckbox = headerCheckbox.closest('.p-checkbox');
               if (pCheckbox) {
                 pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
+                const box = pCheckbox.querySelector('.p-checkbox-box');
+                if (box) {
+                  box.classList.remove('p-disabled');
+                }
               }
-            }
+            });
           }
         }
-      });
+      }, 100);
     });
-
-    // Start observing the table for attribute changes
-    const tableElement = this.element.nativeElement;
-    if (tableElement) {
-      this.mutationObserver.observe(tableElement, {
-        attributes: true,
-        attributeFilter: ['disabled'],
-        subtree: true
-      });
-    }
   }
 
-  private overrideHeaderCheckboxBehavior() {
-    // Try to override the onHeaderCheckboxToggle handler
-    const originalEmit = this.table.onHeaderCheckboxToggle?.emit;
-    if (originalEmit) {
-      this.table.onHeaderCheckboxToggle.emit = (event: any) => {
-        // Prevent the default PrimeNG selection behavior
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        
-        // Handle our custom selection logic
-        this.handleSelectAll(event);
-        // Don't call the original emit as we're handling it ourselves
-      };
-    }
-
-    // Also try to override the table's internal selection methods if they exist
-    const originalUpdateSelection = (this.table as any).updateSelection;
-    if (originalUpdateSelection) {
-      (this.table as any).updateSelection = (event: any, data: any) => {
-        // Only call original for individual row selections, not header checkbox
-        if (!event?.target?.closest('thead')) {
-          originalUpdateSelection.call(this.table, event, data);
-        }
-      };
-    }
-  }
-
-  private interceptHeaderCheckbox() {
-    // Remove any existing listeners first
+  private setupHeaderCheckboxControl() {
     this.removeHeaderCheckboxListeners();
-
+    
     const headerCheckbox = this.getHeaderCheckbox();
     if (!headerCheckbox) {
-      // Try again with a slight delay as the checkbox might not be rendered yet
-      setTimeout(() => {
-        const checkbox = this.getHeaderCheckbox();
-        if (checkbox) {
-          // Ensure it's enabled before attaching listeners
-          checkbox.disabled = false;
-          this.attachHeaderCheckboxListeners(checkbox);
-        }
-      }, 50);
+      setTimeout(() => this.setupHeaderCheckboxControl(), 50);
       return;
     }
 
-    // Ensure the header checkbox is enabled
+    // Force enable
     headerCheckbox.disabled = false;
     
-    // Also ensure the p-checkbox wrapper is not disabled
-    const pCheckbox = headerCheckbox.closest('.p-checkbox');
+    // Remove all PrimeNG event listeners by cloning the element
+    const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
+    headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
+    
+    // Ensure visual state is correct
+    const pCheckbox = newCheckbox.closest('.p-checkbox');
     if (pCheckbox) {
       pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
     }
 
-    this.attachHeaderCheckboxListeners(headerCheckbox);
+    // Attach our single click handler
+    this.attachHeaderCheckboxListener(newCheckbox);
   }
 
-  private attachHeaderCheckboxListeners(headerCheckbox: HTMLInputElement) {
-    // Prevent default behavior and handle our own
+  private attachHeaderCheckboxListener(headerCheckbox: HTMLInputElement) {
     this.headerCheckboxClickListener = (event: Event) => {
-      event.stopPropagation();
       event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
       
-      // Get the current actual state of the checkbox
-      const currentlyChecked = headerCheckbox.checked;
-      const currentlyIndeterminate = headerCheckbox.indeterminate;
+      // Handle the toggle
+      this.handleCustomToggleAll();
       
-      // Determine the next state based on current state
-      let willBeChecked: boolean;
-      
-      if (currentlyIndeterminate) {
-        // If indeterminate, next state should be checked
-        willBeChecked = true;
-      } else {
-        // Otherwise, toggle the current checked state
-        willBeChecked = !currentlyChecked;
-      }
-      
-      // Set the new state
-      headerCheckbox.checked = willBeChecked;
-      headerCheckbox.indeterminate = false;
-      
-      // Handle the action
-      this.handleHeaderCheckboxAction(headerCheckbox);
+      // Return false to prevent any other handlers
+      return false;
     };
 
-    this.headerCheckboxChangeListener = (event: Event) => {
-      event.stopPropagation();
-      event.preventDefault();
-    };
-
-    // Use capture phase to intercept before PrimeNG
+    // Add listener with capture to intercept before anything else
     headerCheckbox.addEventListener('click', this.headerCheckboxClickListener, true);
-    headerCheckbox.addEventListener('change', this.headerCheckboxChangeListener, true);
+    
+    // Also add to mousedown to be extra sure
+    headerCheckbox.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, true);
   }
 
-  private removeHeaderCheckboxListeners() {
+  private handleCustomToggleAll() {
     const headerCheckbox = this.getHeaderCheckbox();
-    if (headerCheckbox) {
-      if (this.headerCheckboxClickListener) {
-        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener as EventListener, true);
-      }
-      if (this.headerCheckboxChangeListener) {
-        headerCheckbox.removeEventListener('change', this.headerCheckboxChangeListener as EventListener, true);
-      }
-    }
-  }
+    if (!headerCheckbox) return;
 
-  private handleHeaderCheckboxAction(checkbox: HTMLInputElement) {
-    // Determine if we're selecting or deselecting based on the checkbox's current state
-    const isSelecting = checkbox.checked;
-
-    if (isSelecting) {
-      this.selectAllEnabled();
+    // Determine next state based on current selection
+    const enabledItems = this.getEnabledItems();
+    const selectedEnabledItems = enabledItems.filter(item => this.isItemSelected(item));
+    
+    let shouldSelectAll = false;
+    
+    if (selectedEnabledItems.length === 0) {
+      // Nothing selected -> select all
+      shouldSelectAll = true;
+    } else if (selectedEnabledItems.length < enabledItems.length) {
+      // Partially selected -> select all
+      shouldSelectAll = true;
     } else {
-      this.deselectAll();
+      // All selected -> deselect all
+      shouldSelectAll = false;
     }
 
-    // Update the header state after a small delay to ensure all changes have propagated
+    // Apply the action
+    if (shouldSelectAll) {
+      this.table.selection = [...enabledItems];
+    } else {
+      this.table.selection = [];
+    }
+
+    // Emit the change
+    if (this.table.selectionChange) {
+      this.table.selectionChange.emit(this.table.selection);
+    }
+
+    // Update visual states
+    this.updateBodyCheckboxes();
+    
+    // Update header state after action
     setTimeout(() => {
       this.updateHeaderCheckboxState();
     }, 10);
   }
 
-  private handleSelectAll(event: any) {
-    const checked = event?.checked ?? event?.originalEvent?.target?.checked;
-    
-    if (checked) {
-      this.selectAllEnabled();
-    } else {
-      this.deselectAll();
+  private removeHeaderCheckboxListeners() {
+    const headerCheckbox = this.getHeaderCheckbox();
+    if (headerCheckbox && this.headerCheckboxClickListener) {
+      headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener, true);
     }
-
-    setTimeout(() => {
-      this.updateHeaderCheckboxState();
-      this.uncheckDisabledCheckboxes();
-    }, 0);
   }
 
   private selectAllEnabled() {
     const enabledItems = this.getEnabledItems();
-    
-    // Update selection with only enabled items
     this.table.selection = [...enabledItems];
     
-    // Emit the change
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
-
-    // Update the visual state of checkboxes immediately
+    
     this.updateBodyCheckboxes();
   }
 
   private deselectAll() {
-    // Clear selection
     this.table.selection = [];
     
-    // Emit the change
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
-
-    // Update the visual state of checkboxes immediately
+    
     this.updateBodyCheckboxes();
   }
 
@@ -303,34 +265,24 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const enabledItems: any[] = [];
     const bodyCheckboxes = this.getBodyCheckboxes();
 
-    // If we have checkboxes in the DOM, use them to determine what's enabled
     if (bodyCheckboxes.length > 0) {
       this.table.value.forEach((item, index) => {
         const checkbox = bodyCheckboxes[index];
-        // Only add items that have enabled checkboxes
         if (checkbox && !checkbox.disabled) {
           enabledItems.push(item);
         }
       });
     } else {
-      // If no checkboxes found (might be virtual scrolling or not rendered yet),
-      // we'll need to check the actual data
-      // In this case, we can't determine disabled state, so include all
-      return [...this.table.value];
+      // Fallback - check if there's a rowSelectable function
+      return this.table.value.filter((item, index) => {
+        if (this.table.rowSelectable && typeof this.table.rowSelectable === 'function') {
+          return this.table.rowSelectable({ data: item, index });
+        }
+        return true;
+      });
     }
 
     return enabledItems;
-  }
-
-  private isRowSelectable(item: any, index: number): boolean {
-    // Check if there's a rowSelectable property (it's an @Input on p-table)
-    // This would be a function that returns boolean
-    if (this.table.rowSelectable && typeof this.table.rowSelectable === 'function') {
-      return this.table.rowSelectable({ data: item, index: index });
-    }
-    
-    // Default to true - the row is selectable unless there's a disabled checkbox
-    return true;
   }
 
   private updateBodyCheckboxes() {
@@ -341,11 +293,29 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       if (!item) return;
       
       if (checkbox.disabled) {
-        // Always uncheck disabled checkboxes
         checkbox.checked = false;
+        // Update visual state
+        const pCheckbox = checkbox.closest('.p-checkbox');
+        if (pCheckbox) {
+          const box = pCheckbox.querySelector('.p-checkbox-box');
+          if (box) {
+            box.classList.remove('p-highlight');
+          }
+        }
       } else {
-        // Check if item is in selection
         checkbox.checked = this.isItemSelected(item);
+        // Update visual state
+        const pCheckbox = checkbox.closest('.p-checkbox');
+        if (pCheckbox) {
+          const box = pCheckbox.querySelector('.p-checkbox-box');
+          if (box) {
+            if (checkbox.checked) {
+              box.classList.add('p-highlight');
+            } else {
+              box.classList.remove('p-highlight');
+            }
+          }
+        }
       }
     });
   }
@@ -355,7 +325,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     bodyCheckboxes.forEach(checkbox => {
       if (checkbox.disabled) {
         checkbox.checked = false;
-        // Also update the visual state of the parent p-checkbox if it exists
         const pCheckbox = checkbox.closest('.p-checkbox');
         if (pCheckbox) {
           const box = pCheckbox.querySelector('.p-checkbox-box');
@@ -363,7 +332,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
             box.classList.remove('p-highlight');
             const icon = box.querySelector('.p-checkbox-icon');
             if (icon) {
-              icon.classList.remove('pi', 'pi-check', 'pi-minus');
+              icon.classList.remove('pi-check', 'pi-minus');
             }
           }
         }
@@ -375,8 +344,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (!this.table.selection?.length) return;
 
     const enabledItems = this.getEnabledItems();
-
-    // Filter selection to only include enabled items
     const validSelection = this.table.selection.filter(item => 
       enabledItems.some(enabledItem => this.itemsEqual(item, enabledItem))
     );
@@ -388,7 +355,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
 
-    // Ensure disabled checkboxes are unchecked
     this.uncheckDisabledCheckboxes();
   }
 
@@ -396,99 +362,75 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const headerCheckbox = this.getHeaderCheckbox();
     if (!headerCheckbox) return;
 
-    const bodyCheckboxes = this.getBodyCheckboxes();
-    let enabledCount = 0;
-    let selectedEnabledCount = 0;
+    // COUNT SELECTION STATE
+    const enabledItems = this.getEnabledItems();
+    const selectedEnabledCount = enabledItems.filter(item => this.isItemSelected(item)).length;
+    const enabledCount = enabledItems.length;
 
-    // Count enabled and selected items
-    bodyCheckboxes.forEach((checkbox, index) => {
-      if (!checkbox.disabled) {
-        enabledCount++;
-        const item = this.table.value?.[index];
-        if (item && this.isItemSelected(item)) {
-          selectedEnabledCount++;
-        }
-      }
-    });
-
-    // CRITICAL FIX: Force header checkbox to always be enabled
+    // FORCE ENABLE - This is critical
     headerCheckbox.disabled = false;
     
-    // Remove disabled classes from the wrapper
+    // Determine visual state
+    let newChecked = false;
+    let newIndeterminate = false;
+    
+    if (enabledCount === 0) {
+      newChecked = false;
+      newIndeterminate = false;
+    } else if (selectedEnabledCount === 0) {
+      newChecked = false;
+      newIndeterminate = false;
+    } else if (selectedEnabledCount === enabledCount) {
+      newChecked = true;
+      newIndeterminate = false;
+    } else {
+      newChecked = false;
+      newIndeterminate = true;
+    }
+
+    // Apply the state
+    headerCheckbox.checked = newChecked;
+    headerCheckbox.indeterminate = newIndeterminate;
+    
+    // Store state for reference
+    this.lastKnownHeaderState = { checked: newChecked, indeterminate: newIndeterminate };
+
+    // Update visual state of p-checkbox wrapper
     const pCheckbox = headerCheckbox.closest('.p-checkbox');
     if (pCheckbox) {
+      // Remove any disabled classes
       pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
+      
       const box = pCheckbox.querySelector('.p-checkbox-box');
       if (box) {
         box.classList.remove('p-disabled');
-      }
-    }
-
-    // Update header checkbox state based on selection
-    if (enabledCount === 0) {
-      // No enabled checkboxes - header stays enabled but unchecked
-      headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = false;
-    } else if (selectedEnabledCount === enabledCount && selectedEnabledCount > 0) {
-      // All enabled items are selected
-      headerCheckbox.checked = true;
-      headerCheckbox.indeterminate = false;
-    } else if (selectedEnabledCount > 0) {
-      // Some enabled items are selected
-      headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = true;
-    } else {
-      // No items are selected
-      headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = false;
-    }
-
-    // Update the visual state of p-checkbox component
-    if (pCheckbox) {
-      const box = pCheckbox.querySelector('.p-checkbox-box');
-      if (box) {
-        if (headerCheckbox.checked) {
+        
+        // Update highlight state
+        if (newChecked || newIndeterminate) {
           box.classList.add('p-highlight');
-          const icon = box.querySelector('.p-checkbox-icon');
-          if (icon) {
-            icon.classList.add('pi', 'pi-check');
-            icon.classList.remove('pi-minus');
-          }
-        } else if (headerCheckbox.indeterminate) {
-          box.classList.add('p-highlight');
-          const icon = box.querySelector('.p-checkbox-icon');
-          if (icon) {
-            icon.classList.remove('pi-check');
-            icon.classList.add('pi', 'pi-minus');
-          }
         } else {
           box.classList.remove('p-highlight');
-          const icon = box.querySelector('.p-checkbox-icon');
-          if (icon) {
+        }
+        
+        // Update icon
+        const icon = box.querySelector('.p-checkbox-icon');
+        if (icon) {
+          icon.classList.remove('pi-check', 'pi-minus');
+          if (newChecked) {
+            icon.classList.add('pi', 'pi-check');
+          } else if (newIndeterminate) {
+            icon.classList.add('pi', 'pi-minus');
+          } else {
             icon.classList.add('pi');
-            icon.classList.remove('pi-check', 'pi-minus');
           }
         }
       }
     }
-
-    // Use RAF to ensure the header stays enabled even after PrimeNG's updates
-    requestAnimationFrame(() => {
-      if (headerCheckbox.disabled) {
-        headerCheckbox.disabled = false;
-        if (pCheckbox) {
-          pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
-        }
-      }
-    });
   }
 
   private isItemSelected(item: any): boolean {
-    if (!this.table.selection) {
-      return false;
-    }
+    if (!this.table.selection) return false;
     
-    // Handle both array and single selection modes
     if (Array.isArray(this.table.selection)) {
       return this.table.selection.some(selectedItem => 
         this.itemsEqual(item, selectedItem)
@@ -500,8 +442,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
   private getHeaderCheckbox(): HTMLInputElement | null {
     const selectors = [
-      'thead p-tableheadercheckbox .p-checkbox-box input[type="checkbox"]',
-      'thead .p-selection-column .p-checkbox-box input[type="checkbox"]',
+      'thead p-tableheadercheckbox input[type="checkbox"]',
+      'thead .p-selection-column input[type="checkbox"]',
       'thead .p-checkbox input[type="checkbox"]',
       'thead input[type="checkbox"][role="checkbox"]',
       'thead input[type="checkbox"]'
@@ -517,8 +459,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
   private getBodyCheckboxes(): HTMLInputElement[] {
     const selectors = [
-      'tbody p-tablecheckbox .p-checkbox-box input[type="checkbox"]',
-      'tbody .p-selection-column .p-checkbox-box input[type="checkbox"]',
+      'tbody p-tablecheckbox input[type="checkbox"]',
+      'tbody .p-selection-column input[type="checkbox"]',
       'tbody .p-checkbox input[type="checkbox"]',
       'tbody input[type="checkbox"][role="checkbox"]',
       'tbody input[type="checkbox"]'
@@ -536,11 +478,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
   private itemsEqual(item1: any, item2: any): boolean {
     if (item1 === item2) return true;
-    
-    // Handle null/undefined
     if (!item1 || !item2) return false;
     
-    // If using dataKey on the table, use that
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(item1, this.table.dataKey);
       const key2 = this.resolveFieldData(item2, this.table.dataKey);
@@ -549,7 +488,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
     
-    // Try to compare by common ID properties
     const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
     for (const prop of idProps) {
       if (item1[prop] !== undefined && item2[prop] !== undefined) {
@@ -557,7 +495,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
     
-    // Fallback to reference equality
     return false;
   }
 
@@ -570,9 +507,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       const fields = field.split('.');
       let value = data;
       for (const f of fields) {
-        if (value == null) {
-          return undefined;
-        }
+        if (value == null) return undefined;
         value = value[f];
       }
       return value;
