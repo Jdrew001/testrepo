@@ -9,9 +9,9 @@ import { takeUntil } from 'rxjs/operators';
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
-  private headerCheckboxMonitorInterval?: any;
-  private isProcessingHeaderClick = false;
-  private originalHeaderClickHandler?: Function;
+  private headerCheckboxInterval?: any;
+  private originalToggleAllFn?: Function;
+  private isProcessingToggle = false;
 
   constructor(
     @Host() private table: Table,
@@ -21,351 +21,361 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   ) {}
 
   ngOnInit() {
-    // Monitor selection changes to clean up disabled items
+    // Store the original toggleAll function
+    this.originalToggleAllFn = (this.table as any).toggleAll?.bind(this.table);
+    
+    // Override the toggleAll method to filter disabled items
+    if ((this.table as any).toggleAll) {
+      (this.table as any).toggleAll = (event: any) => {
+        this.customToggleAll(event);
+      };
+    }
+
+    // Monitor selection changes
     if (this.table.selectionChange) {
       this.table.selectionChange
         .pipe(takeUntil(this.destroy$))
         .subscribe(() => {
-          // Don't update if we're processing a header click
-          if (!this.isProcessingHeaderClick) {
-            setTimeout(() => {
-              this.cleanupDisabledItems();
-              this.updateHeaderCheckboxState();
-            }, 0);
+          if (!this.isProcessingToggle) {
+            requestAnimationFrame(() => {
+              this.cleanupDisabledFromSelection();
+              this.updateHeaderCheckbox();
+            });
           }
         });
     }
-
-    // Override PrimeNG's header checkbox behavior
-    this.overridePrimeNGHeaderBehavior();
   }
 
   ngAfterViewInit() {
-    // Initial setup
+    // Initial setup after view is ready
     setTimeout(() => {
-      this.setupHeaderCheckbox();
-      this.updateHeaderCheckboxState();
-      this.uncheckDisabledCheckboxes();
-      
-      // Start monitoring to keep header enabled
-      this.startHeaderMonitoring();
+      this.initializeHeaderFix();
     }, 100);
 
-    // Handle table updates - be careful not to break row selection
-    [this.table.onPage, this.table.onSort, this.table.onFilter].forEach(event => {
-      if (event) {
-        event.pipe(takeUntil(this.destroy$)).subscribe(() => {
-          // Wait for PrimeNG to finish updating
-          setTimeout(() => {
-            this.setupHeaderCheckbox();
-            this.updateHeaderCheckboxState();
-            this.uncheckDisabledCheckboxes();
-          }, 150);
-        });
-      }
-    });
-
-    // Handle lazy loading
-    if (this.table.onLazyLoad) {
-      this.table.onLazyLoad.pipe(takeUntil(this.destroy$)).subscribe(() => {
-        setTimeout(() => {
-          this.setupHeaderCheckbox();
-          this.updateHeaderCheckboxState();
-          this.uncheckDisabledCheckboxes();
-        }, 150);
-      });
-    }
+    // Re-initialize after table operations
+    this.setupTableEventHandlers();
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
     
-    // Clean up monitoring
-    if (this.headerCheckboxMonitorInterval) {
-      clearInterval(this.headerCheckboxMonitorInterval);
+    if (this.headerCheckboxInterval) {
+      clearInterval(this.headerCheckboxInterval);
+    }
+
+    // Restore original function if needed
+    if (this.originalToggleAllFn && (this.table as any).toggleAll) {
+      (this.table as any).toggleAll = this.originalToggleAllFn;
     }
   }
 
-  private overridePrimeNGHeaderBehavior() {
-    // Override the table's toggleAll method
-    const originalToggleAll = (this.table as any).toggleAll;
-    if (originalToggleAll) {
-      (this.table as any).toggleAll = (event: any) => {
-        this.handleCustomToggleAll();
-      };
+  private setupTableEventHandlers() {
+    // Re-initialize after pagination
+    if (this.table.onPage) {
+      this.table.onPage.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        // Use longer timeout for page changes to ensure DOM is ready
+        setTimeout(() => {
+          this.initializeHeaderFix();
+        }, 200);
+      });
     }
 
-    // Override header checkbox toggle event
-    if (this.table.onHeaderCheckboxToggle) {
-      this.table.onHeaderCheckboxToggle.emit = (event: any) => {
-        this.handleCustomToggleAll();
-      };
+    // Re-initialize after sorting
+    if (this.table.onSort) {
+      this.table.onSort.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        setTimeout(() => {
+          this.initializeHeaderFix();
+        }, 150);
+      });
     }
+
+    // Re-initialize after filtering
+    if (this.table.onFilter) {
+      this.table.onFilter.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        setTimeout(() => {
+          this.initializeHeaderFix();
+        }, 150);
+      });
+    }
+
+    // Handle lazy loading
+    if (this.table.onLazyLoad) {
+      this.table.onLazyLoad.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        setTimeout(() => {
+          this.initializeHeaderFix();
+        }, 200);
+      });
+    }
+  }
+
+  private initializeHeaderFix() {
+    this.cleanupDisabledFromSelection();
+    this.updateHeaderCheckbox();
+    this.startHeaderMonitoring();
   }
 
   private startHeaderMonitoring() {
-    // Monitor header checkbox state outside Angular zone for performance
+    // Clear any existing interval
+    if (this.headerCheckboxInterval) {
+      clearInterval(this.headerCheckboxInterval);
+    }
+
+    // Monitor header checkbox state
     this.ngZone.runOutsideAngular(() => {
-      this.headerCheckboxMonitorInterval = setInterval(() => {
-        const headerCheckbox = this.getHeaderCheckbox();
-        if (headerCheckbox && headerCheckbox.disabled) {
-          this.ngZone.run(() => {
-            headerCheckbox.disabled = false;
-            this.updateHeaderCheckboxVisualState(headerCheckbox);
-          });
+      this.headerCheckboxInterval = setInterval(() => {
+        const headerEl = this.getHeaderCheckboxElement();
+        if (headerEl) {
+          const checkbox = headerEl.querySelector('input[type="checkbox"]');
+          if (checkbox && (checkbox as HTMLInputElement).disabled) {
+            this.ngZone.run(() => {
+              this.renderer.setProperty(checkbox, 'disabled', false);
+              this.updateHeaderVisualState();
+            });
+          }
         }
       }, 100);
     });
   }
 
-  private setupHeaderCheckbox() {
-    const headerCheckbox = this.getHeaderCheckbox();
-    if (!headerCheckbox) {
-      setTimeout(() => this.setupHeaderCheckbox(), 50);
-      return;
-    }
+  private customToggleAll(event: any) {
+    this.isProcessingToggle = true;
 
-    // Ensure it's enabled
-    headerCheckbox.disabled = false;
+    // Get current page data
+    const currentData = this.getCurrentPageData();
     
-    // Remove only the click listener, not the element itself
-    const clickListeners = (headerCheckbox as any).__clickListeners;
-    if (clickListeners) {
-      clickListeners.forEach((listener: EventListener) => {
-        headerCheckbox.removeEventListener('click', listener);
-      });
-    }
-
-    // Find and override the p-tableheadercheckbox component click
-    const pTableHeaderCheckbox = headerCheckbox.closest('p-tableheadercheckbox');
-    if (pTableHeaderCheckbox) {
-      // Override click on the wrapper div that PrimeNG uses
-      const checkboxWrapper = pTableHeaderCheckbox.querySelector('.p-checkbox');
-      if (checkboxWrapper) {
-        // Store original onclick if exists
-        const originalOnclick = (checkboxWrapper as any).onclick;
-        
-        // Replace with our handler
-        (checkboxWrapper as any).onclick = (e: Event) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.isProcessingHeaderClick = true;
-          this.handleCustomToggleAll();
-          setTimeout(() => {
-            this.isProcessingHeaderClick = false;
-          }, 100);
-        };
-      }
-    }
-
-    // Also intercept the input checkbox itself
-    headerCheckbox.onclick = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-      this.isProcessingHeaderClick = true;
-      this.handleCustomToggleAll();
-      setTimeout(() => {
-        this.isProcessingHeaderClick = false;
-      }, 100);
-    };
-
-    this.updateHeaderCheckboxVisualState(headerCheckbox);
-  }
-
-  private updateHeaderCheckboxVisualState(headerCheckbox: HTMLInputElement) {
-    const pCheckbox = headerCheckbox.closest('.p-checkbox');
-    if (pCheckbox) {
-      pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
-      const box = pCheckbox.querySelector('.p-checkbox-box');
-      if (box) {
-        box.classList.remove('p-disabled');
-      }
-    }
-  }
-
-  private handleCustomToggleAll() {
-    // Check if table has any data
-    if (!this.table.value || this.table.value.length === 0) {
-      return;
-    }
-
-    // Get enabled items
-    const enabledItems = this.getEnabledItems();
+    // Get enabled items only
+    const enabledItems = this.getEnabledItemsFromData(currentData);
+    
     if (enabledItems.length === 0) {
+      this.isProcessingToggle = false;
       return;
     }
+
+    // Check current selection state
+    const allEnabledSelected = enabledItems.every(item => this.isItemSelected(item));
     
-    // Count currently selected enabled items
-    const selectedEnabledItems = enabledItems.filter(item => this.isItemSelected(item));
+    // Build new selection
+    let newSelection: any[] = [];
     
-    // Determine action
-    let shouldSelectAll = selectedEnabledItems.length < enabledItems.length;
+    if (this.table.selection && Array.isArray(this.table.selection)) {
+      // Keep existing selection from other pages
+      newSelection = this.table.selection.filter(item => 
+        !currentData.some(pageItem => this.itemsEqual(item, pageItem))
+      );
+    }
+
+    // Add/remove current page enabled items
+    if (!allEnabledSelected) {
+      // Add all enabled items from current page
+      newSelection = [...newSelection, ...enabledItems];
+    }
+    // If all were selected, we're deselecting, so don't add them
 
     // Update selection
-    if (shouldSelectAll) {
-      this.table.selection = [...enabledItems];
-    } else {
-      this.table.selection = [];
-    }
-
+    this.table.selection = newSelection;
+    
     // Emit change
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update visual states
-    this.updateAllCheckboxStates();
-  }
-
-  private updateAllCheckboxStates() {
-    // Update body checkboxes
-    this.updateBodyCheckboxes();
+    // Update visual state
+    this.updateTableCheckboxes();
     
-    // Update header after a brief delay
     setTimeout(() => {
-      this.updateHeaderCheckboxState();
-    }, 20);
+      this.updateHeaderCheckbox();
+      this.isProcessingToggle = false;
+    }, 50);
   }
 
-  private getEnabledItems(): any[] {
-    if (!this.table.value) return [];
+  private getCurrentPageData(): any[] {
+    // For paginated tables
+    if (this.table.paginator && this.table.rows) {
+      const first = this.table.first || 0;
+      const rows = this.table.rows;
+      return (this.table.filteredValue || this.table.value || []).slice(first, first + rows);
+    }
+    
+    // For non-paginated tables
+    return this.table.filteredValue || this.table.value || [];
+  }
 
+  private getEnabledItemsFromData(data: any[]): any[] {
     const enabledItems: any[] = [];
-    const bodyCheckboxes = this.getBodyCheckboxes();
-
-    if (bodyCheckboxes.length > 0) {
-      this.table.value.forEach((item, index) => {
-        const checkbox = bodyCheckboxes[index];
-        if (checkbox && !checkbox.disabled) {
-          enabledItems.push(item);
+    const checkboxes = this.getBodyCheckboxes();
+    
+    if (checkboxes.length > 0) {
+      // Use actual checkbox state
+      data.forEach((item, index) => {
+        if (index < checkboxes.length) {
+          const checkbox = checkboxes[index];
+          if (!checkbox.disabled) {
+            enabledItems.push(item);
+          }
         }
       });
     } else {
-      // Return all if we can't determine disabled state
-      return [...this.table.value];
+      // If no checkboxes found, assume all are enabled
+      return [...data];
     }
-
+    
     return enabledItems;
   }
 
-  private updateBodyCheckboxes() {
-    const bodyCheckboxes = this.getBodyCheckboxes();
-    
-    bodyCheckboxes.forEach((checkbox, index) => {
-      const item = this.table.value?.[index];
-      if (!item) return;
-      
-      if (checkbox.disabled) {
-        // Ensure disabled checkboxes are unchecked
-        if (checkbox.checked) {
-          checkbox.checked = false;
-          checkbox.indeterminate = false;
-        }
-      } else {
-        // Update enabled checkbox - let PrimeNG handle the visual update
-        const isSelected = this.isItemSelected(item);
-        if (checkbox.checked !== isSelected) {
-          checkbox.checked = isSelected;
-        }
-      }
-    });
-  }
-
-  private uncheckDisabledCheckboxes() {
-    const bodyCheckboxes = this.getBodyCheckboxes();
-    bodyCheckboxes.forEach(checkbox => {
-      if (checkbox.disabled && checkbox.checked) {
-        checkbox.checked = false;
-        checkbox.indeterminate = false;
-      }
-    });
-  }
-
-  private cleanupDisabledItems() {
-    if (!this.table.selection || !Array.isArray(this.table.selection) || this.table.selection.length === 0) {
+  private cleanupDisabledFromSelection() {
+    if (!this.table.selection || !Array.isArray(this.table.selection)) {
       return;
     }
 
-    const enabledItems = this.getEnabledItems();
-    const validSelection = this.table.selection.filter(item => 
-      enabledItems.some(enabledItem => this.itemsEqual(item, enabledItem))
-    );
+    const currentData = this.getCurrentPageData();
+    const enabledItems = this.getEnabledItemsFromData(currentData);
+    
+    // Remove disabled items from selection
+    const cleanedSelection = this.table.selection.filter(selectedItem => {
+      // Check if this item is in current page
+      const isInCurrentPage = currentData.some(item => this.itemsEqual(item, selectedItem));
+      
+      if (isInCurrentPage) {
+        // If in current page, only keep if enabled
+        return enabledItems.some(item => this.itemsEqual(item, selectedItem));
+      }
+      
+      // Keep items from other pages
+      return true;
+    });
 
-    if (validSelection.length !== this.table.selection.length) {
-      this.table.selection = validSelection;
+    if (cleanedSelection.length !== this.table.selection.length) {
+      this.table.selection = cleanedSelection;
       if (this.table.selectionChange) {
-        this.table.selectionChange.emit(validSelection);
+        this.table.selectionChange.emit(cleanedSelection);
       }
     }
   }
 
-  private updateHeaderCheckboxState() {
-    const headerCheckbox = this.getHeaderCheckbox();
-    if (!headerCheckbox) return;
-
-    // Ensure it's enabled
-    headerCheckbox.disabled = false;
+  private updateTableCheckboxes() {
+    const checkboxes = this.getBodyCheckboxes();
+    const currentData = this.getCurrentPageData();
     
-    // Check data and selection state
-    const hasData = this.table.value && this.table.value.length > 0;
-    const enabledItems = this.getEnabledItems();
-    const selectedEnabledCount = enabledItems.filter(item => this.isItemSelected(item)).length;
-    const enabledCount = enabledItems.length;
+    checkboxes.forEach((checkbox, index) => {
+      if (index < currentData.length) {
+        const item = currentData[index];
+        const isSelected = this.isItemSelected(item);
+        
+        if (checkbox.disabled) {
+          // Force disabled checkboxes to be unchecked
+          this.renderer.setProperty(checkbox, 'checked', false);
+        } else {
+          // Update enabled checkboxes
+          this.renderer.setProperty(checkbox, 'checked', isSelected);
+        }
+        
+        // Update visual state through PrimeNG's classes
+        const wrapper = checkbox.closest('.p-checkbox');
+        if (wrapper) {
+          const box = wrapper.querySelector('.p-checkbox-box');
+          if (box) {
+            if (isSelected && !checkbox.disabled) {
+              this.renderer.addClass(box, 'p-highlight');
+            } else {
+              this.renderer.removeClass(box, 'p-highlight');
+            }
+          }
+        }
+      }
+    });
+  }
 
-    // Determine visual state
-    let newChecked = false;
-    let newIndeterminate = false;
+  private updateHeaderCheckbox() {
+    const headerEl = this.getHeaderCheckboxElement();
+    if (!headerEl) return;
+
+    const checkbox = headerEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    if (!checkbox) return;
+
+    // Force enable
+    this.renderer.setProperty(checkbox, 'disabled', false);
+
+    const currentData = this.getCurrentPageData();
+    const enabledItems = this.getEnabledItemsFromData(currentData);
     
-    if (!hasData || enabledCount === 0) {
-      newChecked = false;
-      newIndeterminate = false;
-    } else if (selectedEnabledCount === 0) {
-      newChecked = false;
-      newIndeterminate = false;
-    } else if (selectedEnabledCount === enabledCount) {
-      newChecked = true;
-      newIndeterminate = false;
+    let checkedCount = 0;
+    let enabledCount = enabledItems.length;
+
+    enabledItems.forEach(item => {
+      if (this.isItemSelected(item)) {
+        checkedCount++;
+      }
+    });
+
+    // Update checkbox state
+    if (enabledCount === 0 || checkedCount === 0) {
+      this.renderer.setProperty(checkbox, 'checked', false);
+      this.renderer.setProperty(checkbox, 'indeterminate', false);
+    } else if (checkedCount === enabledCount) {
+      this.renderer.setProperty(checkbox, 'checked', true);
+      this.renderer.setProperty(checkbox, 'indeterminate', false);
     } else {
-      newChecked = false;
-      newIndeterminate = true;
+      this.renderer.setProperty(checkbox, 'checked', false);
+      this.renderer.setProperty(checkbox, 'indeterminate', true);
     }
 
-    // Apply state
-    headerCheckbox.checked = newChecked;
-    headerCheckbox.indeterminate = newIndeterminate;
+    this.updateHeaderVisualState();
+  }
 
-    // Update visual wrapper
-    const pCheckbox = headerCheckbox.closest('.p-checkbox');
-    if (pCheckbox) {
-      pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
+  private updateHeaderVisualState() {
+    const headerEl = this.getHeaderCheckboxElement();
+    if (!headerEl) return;
+
+    const checkbox = headerEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    if (!checkbox) return;
+
+    const wrapper = headerEl.querySelector('.p-checkbox');
+    if (wrapper) {
+      this.renderer.removeClass(wrapper, 'p-checkbox-disabled');
+      this.renderer.removeClass(wrapper, 'p-disabled');
       
-      const box = pCheckbox.querySelector('.p-checkbox-box');
+      const box = wrapper.querySelector('.p-checkbox-box');
       if (box) {
-        box.classList.remove('p-disabled');
+        this.renderer.removeClass(box, 'p-disabled');
         
-        // Update highlight
-        if (newChecked || newIndeterminate) {
-          box.classList.add('p-highlight');
+        // Update highlight based on state
+        if (checkbox.checked || checkbox.indeterminate) {
+          this.renderer.addClass(box, 'p-highlight');
         } else {
-          box.classList.remove('p-highlight');
+          this.renderer.removeClass(box, 'p-highlight');
         }
         
         // Update icon
         const icon = box.querySelector('.p-checkbox-icon');
         if (icon) {
-          icon.className = 'p-checkbox-icon';
+          // Clear existing classes
+          this.renderer.setAttribute(icon, 'class', 'p-checkbox-icon');
           
-          if (newChecked) {
-            icon.classList.add('pi', 'pi-check');
-          } else if (newIndeterminate) {
-            icon.classList.add('pi', 'pi-minus');
+          if (checkbox.checked) {
+            this.renderer.addClass(icon, 'pi');
+            this.renderer.addClass(icon, 'pi-check');
+          } else if (checkbox.indeterminate) {
+            this.renderer.addClass(icon, 'pi');
+            this.renderer.addClass(icon, 'pi-minus');
           } else {
-            icon.classList.add('pi');
+            this.renderer.addClass(icon, 'pi');
           }
         }
       }
     }
+  }
+
+  private getHeaderCheckboxElement(): HTMLElement | null {
+    return this.element.nativeElement.querySelector('thead p-tableheadercheckbox') ||
+           this.element.nativeElement.querySelector('thead .p-selection-column');
+  }
+
+  private getBodyCheckboxes(): HTMLInputElement[] {
+    const checkboxes = this.element.nativeElement.querySelectorAll(
+      'tbody .p-selection-column input[type="checkbox"], tbody p-tablecheckbox input[type="checkbox"]'
+    );
+    return Array.from(checkboxes);
   }
 
   private isItemSelected(item: any): boolean {
@@ -375,50 +385,15 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       return this.table.selection.some(selectedItem => 
         this.itemsEqual(item, selectedItem)
       );
-    } else {
-      return this.itemsEqual(item, this.table.selection);
     }
-  }
-
-  private getHeaderCheckbox(): HTMLInputElement | null {
-    const selectors = [
-      'thead p-tableheadercheckbox input[type="checkbox"]',
-      'thead .p-selection-column input[type="checkbox"]',
-      'thead .p-checkbox input[type="checkbox"]',
-      'thead input[type="checkbox"][role="checkbox"]'
-    ];
-
-    for (const selector of selectors) {
-      const element = this.element.nativeElement.querySelector(selector);
-      if (element) return element as HTMLInputElement;
-    }
-
-    return null;
-  }
-
-  private getBodyCheckboxes(): HTMLInputElement[] {
-    const selectors = [
-      'tbody p-tablecheckbox input[type="checkbox"]',
-      'tbody .p-selection-column input[type="checkbox"]',
-      'tbody .p-checkbox input[type="checkbox"]',
-      'tbody input[type="checkbox"][role="checkbox"]'
-    ];
-
-    for (const selector of selectors) {
-      const elements = this.element.nativeElement.querySelectorAll(selector);
-      if (elements.length > 0) {
-        return Array.from(elements) as HTMLInputElement[];
-      }
-    }
-
-    return [];
+    
+    return this.itemsEqual(item, this.table.selection);
   }
 
   private itemsEqual(item1: any, item2: any): boolean {
     if (item1 === item2) return true;
     if (!item1 || !item2) return false;
     
-    // Use dataKey if available
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(item1, this.table.dataKey);
       const key2 = this.resolveFieldData(item2, this.table.dataKey);
@@ -427,7 +402,6 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
     
-    // Try common ID fields
     const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
     for (const prop of idProps) {
       if (item1[prop] !== undefined && item2[prop] !== undefined) {
@@ -443,14 +417,14 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     
     if (field.indexOf('.') === -1) {
       return data[field];
-    } else {
-      const fields = field.split('.');
-      let value = data;
-      for (const f of fields) {
-        if (value == null) return undefined;
-        value = value[f];
-      }
-      return value;
     }
+    
+    const fields = field.split('.');
+    let value = data;
+    for (const f of fields) {
+      if (value == null) return undefined;
+      value = value[f];
+    }
+    return value;
   }
 }
