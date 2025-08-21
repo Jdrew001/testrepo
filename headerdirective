@@ -30,6 +30,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Override header checkbox behavior
     setTimeout(() => {
       this.setupHeaderCheckboxOverride();
+      this.updateHeaderCheckboxState();
     }, 100);
   }
 
@@ -66,6 +67,11 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (checkbox.checked) {
       // Select only enabled items
       this.selectEnabledItemsOnly();
+      // Force header checkbox to stay checked
+      setTimeout(() => {
+        checkbox.checked = true;
+        checkbox.indeterminate = false;
+      }, 0);
     } else {
       // Deselect all
       this.table.selection = [];
@@ -94,6 +100,11 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         checkbox.checked = true;
       }
     });
+
+    // Update header checkbox state
+    setTimeout(() => {
+      this.updateHeaderCheckboxState();
+    }, 0);
   }
 
   private cleanupDisabledItems() {
@@ -124,6 +135,48 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           checkbox.checked = false;
         }
       });
+
+      // Update header checkbox state
+      setTimeout(() => {
+        this.updateHeaderCheckboxState();
+      }, 0);
+    }
+  }
+
+  private updateHeaderCheckboxState() {
+    const headerCheckbox = this.getHeaderCheckbox();
+    if (!headerCheckbox) return;
+
+    const bodyCheckboxes = this.getBodyCheckboxes();
+    let enabledCount = 0;
+    let selectedEnabledCount = 0;
+
+    bodyCheckboxes.forEach(checkbox => {
+      if (!checkbox.disabled) {
+        enabledCount++;
+        if (checkbox.checked) {
+          selectedEnabledCount++;
+        }
+      }
+    });
+
+    if (enabledCount === 0) {
+      // No enabled checkboxes
+      headerCheckbox.checked = false;
+      headerCheckbox.indeterminate = false;
+    } else if (selectedEnabledCount === enabledCount) {
+      // All enabled items are selected
+      headerCheckbox.checked = true;
+      headerCheckbox.indeterminate = false;
+    } else if (selectedEnabledCount > 0) {
+      // Some enabled items are selected
+      headerCheckbox.checked = false;
+      headerCheckbox.indeterminate = true;
+    } else {
+      // No items are selected
+      headerCheckbox.checked = false;
+      headerCheckbox.indeterminate = false;
+    }
     }
   }
 
