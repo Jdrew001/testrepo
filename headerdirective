@@ -1,834 +1,159 @@
 /**
 
-- PrimeNG Smart Selection Directive
+- Simple PrimeNG Selection Fix
 - 
-- The most advanced solution for PrimeNG DataTable selection issues.
-- Only requires an ID key - automatically detects and handles disabled rows.
-- 
-- Features:
-- - Auto-detects disabled checkboxes from DOM
-- - Intelligent caching for performance
-- - Works with any ID property name
-- - Handles dynamic data changes
-- - Memory leak prevention
-- - Comprehensive error handling
-- - TypeScript strict mode compatible
+- Fixes the “select all” issue where disabled checkboxes get selected.
+- Just add to your table - no configuration needed!
 - 
 - Usage:
-- <p-table
-- [value]=“items”
-- [(selection)]=“selectedItems”
-- appSmartSelection
-- idKey=“id”>  <!-- Only this is required! -->
+- <p-table [value]=“items” [(selection)]=“selected” appSelectionFix>
+- <!-- your existing table template -->
 - </p-table>
-- 
-- @author GitHub Community
-- @version 2.0.0
-- @license MIT
-  */
 
-import {
-Directive,
-Input,
-Host,
-OnInit,
-OnDestroy,
-AfterViewInit,
-ElementRef,
-ChangeDetectorRef,
-NgZone,
-OnChanges,
-SimpleChanges
-} from ‘@angular/core’;
+*/
+
+import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from ‘@angular/core’;
 import { Table } from ‘primeng/table’;
-import { Subject, takeUntil, debounceTime, distinctUntilChanged } from ‘rxjs’;
-
-interface CacheEntry {
-timestamp: number;
-selectableIds: Set<string | number>;
-totalCount: number;
-}
 
 @Directive({
-selector: ‘[appSmartSelection]’
+selector: ‘[appSelectionFix]’
 })
-export class SmartSelectionDirective implements OnInit, OnDestroy, AfterViewInit, OnChanges {
+export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
-/**
-
-- The property name used as unique identifier for rows
-- Default: ‘id’
-  */
-  @Input() idKey: string = ‘id’;
-
-/**
-
-- Enable debug logging (useful for development)
-- Default: false
-  */
-  @Input() debugMode: boolean = false;
-
-/**
-
-- Cache duration in milliseconds for performance optimization
-- Default: 500ms
-  */
-  @Input() cacheTimeout: number = 500;
-
-/**
-
-- Custom equality function for comparing items (optional)
-  */
-  @Input() itemComparer?: (item1: any, item2: any) => boolean;
-
-private destroy$ = new Subject<void>();
-private selectionChange$ = new Subject<any[]>();
-private originalToggleRowsWithCheckbox: any;
-private cache: CacheEntry | null = null;
-private mutationObserver: MutationObserver | null = null;
-private isInitialized = false;
+private originalMethod: any;
+private cleanupTimer: any;
 
 constructor(
 @Host() private table: Table,
-private elementRef: ElementRef,
-private cdr: ChangeDetectorRef,
-private ngZone: NgZone
-) {
-this.setupSelectionDebouncing();
-}
+private element: ElementRef
+) {}
 
-ngOnInit(): void {
-this.validateConfiguration();
-this.overrideTableMethods();
-}
-
-ngAfterViewInit(): void {
-this.ngZone.runOutsideAngular(() => {
-setTimeout(() => {
-this.initializeSmartSelection();
-this.setupDOMObserver();
-}, 50);
-});
-}
-
-ngOnChanges(changes: SimpleChanges): void {
-if (changes[‘idKey’] || changes[‘cacheTimeout’]) {
-this.invalidateCache();
-}
-}
-
-ngOnDestroy(): void {
-this.cleanup();
-}
-
-// ==================== CORE METHODS ====================
-
-/**
-
-- Initialize the smart selection system
-  */
-  private initializeSmartSelection(): void {
-  this.log(‘Initializing Smart Selection Directive’);
+ngOnInit() {
+// Override the “select all” method
+this.originalMethod = this.table.toggleRowsWithCheckbox?.bind(this.table);
 
 ```
-this.cleanupInitialSelection();
-this.setupSelectionMonitoring();
-this.isInitialized = true;
-
-this.log('Smart Selection initialized successfully');
-```
-
-}
-
-/**
-
-- Override PrimeNG’s selection methods
-  */
-  private overrideTableMethods(): void {
-  if (!this.table.toggleRowsWithCheckbox) {
-  this.log(‘Warning: toggleRowsWithCheckbox method not found’);
-  return;
-  }
-
-```
-this.originalToggleRowsWithCheckbox = this.table.toggleRowsWithCheckbox.bind(this.table);
-
-this.table.toggleRowsWithCheckbox = (event: Event, checked: boolean) => {
-  this.handleSmartToggle(event, checked);
-};
-```
-
-}
-
-/**
-
-- Handle smart toggle for select all functionality
-  */
-  private handleSmartToggle(event: Event, checked: boolean): void {
-  this.log(`Smart toggle triggered: ${checked ? 'SELECT ALL' : 'DESELECT ALL'}`);
-
-```
-try {
-  if (checked) {
-    const selectableItems = this.getSelectableItems();
-    this.updateSelection(selectableItems, 'BULK_SELECT');
-  } else {
-    this.updateSelection([], 'BULK_DESELECT');
-  }
-
-  this.emitHeaderCheckboxEvent(event, checked);
-  this.updateTableInternalState();
-  
-} catch (error) {
-  this.log('Error in smart toggle:', error);
-  this.fallbackToOriginalMethod(event, checked);
-}
-```
-
-}
-
-// ==================== SELECTION LOGIC ====================
-
-/**
-
-- Get all selectable items with intelligent caching
-  */
-  private getSelectableItems(): any[] {
-  if (!this.table.value?.length) {
-  return [];
-  }
-
-```
-// Check cache first
-const cached = this.getCachedSelectableItems();
-if (cached) {
-  this.log(`Using cached selectable items: ${cached.length} items`);
-  return cached;
-}
-
-// Generate fresh list
-const selectableItems = this.generateSelectableItems();
-this.cacheSelectableItems(selectableItems);
-
-this.log(`Generated fresh selectable items: ${selectableItems.length} items`);
-return selectableItems;
-```
-
-}
-
-/**
-
-- Generate list of selectable items by checking DOM state
-  */
-  private generateSelectableItems(): any[] {
-  const selectableItems: any[] = [];
-  const selectableIds = this.getSelectableIdsFromDOM();
-
-```
-if (selectableIds.size === 0) {
-  // Fallback: assume all items are selectable if no checkboxes found yet
-  this.log('No checkboxes detected, assuming all items selectable');
-  return [...this.table.value];
-}
-
-for (const item of this.table.value) {
-  const itemId = this.getItemId(item);
-  if (itemId !== null && selectableIds.has(itemId)) {
-    selectableItems.push(item);
-  }
-}
-
-return selectableItems;
-```
-
-}
-
-/**
-
-- Get selectable item IDs by scanning DOM checkboxes
-  */
-  private getSelectableIdsFromDOM(): Set<string | number> {
-  const selectableIds = new Set<string | number>();
-
-```
-try {
-  const checkboxes = this.getTableCheckboxes();
-  
-  checkboxes.forEach((checkbox, index) => {
-    if (!checkbox.disabled && this.table.value[index]) {
-      const itemId = this.getItemId(this.table.value[index]);
-      if (itemId !== null) {
-        selectableIds.add(itemId);
-      }
+if (this.table.toggleRowsWithCheckbox) {
+  this.table.toggleRowsWithCheckbox = (event: Event, checked: boolean) => {
+    if (checked) {
+      // When selecting all, only select enabled rows
+      this.selectOnlyEnabledRows(event);
+    } else {
+      // When deselecting, use original method
+      this.originalMethod(event, checked);
     }
-  });
-  
-} catch (error) {
-  this.log('Error scanning DOM checkboxes:', error);
+  };
 }
-
-return selectableIds;
 ```
 
 }
 
-/**
-
-- Get all table checkboxes from DOM
-  */
-  private getTableCheckboxes(): HTMLInputElement[] {
-  const selectors = [
-  ‘tbody p-tablecheckbox input[type=“checkbox”]’,
-  ‘tbody .p-checkbox input[type=“checkbox”]’,
-  ’tbody input[type=“checkbox”][class*=“checkbox”]’
-  ];
-
-```
-for (const selector of selectors) {
-  const checkboxes = Array.from(
-    this.elementRef.nativeElement.querySelectorAll(selector)
-  ) as HTMLInputElement[];
-  
-  if (checkboxes.length > 0) {
-    return checkboxes;
-  }
+ngAfterViewInit() {
+// Clean up any initially selected disabled items
+setTimeout(() => this.cleanupSelection(), 100);
 }
 
-return [];
+ngOnDestroy() {
+// Restore original method
+if (this.originalMethod) {
+this.table.toggleRowsWithCheckbox = this.originalMethod;
+}
+
+```
+if (this.cleanupTimer) {
+  clearTimeout(this.cleanupTimer);
+}
 ```
 
 }
 
-// ==================== CACHING SYSTEM ====================
-
-/**
-
-- Get cached selectable items if valid
-  */
-  private getCachedSelectableItems(): any[] | null {
-  if (!this.cache || !this.isCacheValid()) {
-  return null;
-  }
+private selectOnlyEnabledRows(event: Event) {
+if (!this.table.value) return;
 
 ```
-const items: any[] = [];
-for (const item of this.table.value) {
-  const itemId = this.getItemId(item);
-  if (itemId !== null && this.cache.selectableIds.has(itemId)) {
-    items.push(item);
-  }
-}
-
-return items;
-```
-
-}
-
-/**
-
-- Cache selectable items for performance
-  */
-  private cacheSelectableItems(items: any[]): void {
-  const selectableIds = new Set<string | number>();
-  items.forEach(item => {
-  const id = this.getItemId(item);
-  if (id !== null) selectableIds.add(id);
-  });
-
-```
-this.cache = {
-  timestamp: Date.now(),
-  selectableIds,
-  totalCount: this.table.value?.length || 0
-};
-```
-
-}
-
-/**
-
-- Check if cache is still valid
-  */
-  private isCacheValid(): boolean {
-  if (!this.cache) return false;
-
-```
-const isExpired = (Date.now() - this.cache.timestamp) > this.cacheTimeout;
-const countChanged = this.cache.totalCount !== (this.table.value?.length || 0);
-
-return !isExpired && !countChanged;
-```
-
-}
-
-/**
-
-- Invalidate cache
-  */
-  private invalidateCache(): void {
-  this.cache = null;
-  this.log(‘Cache invalidated’);
-  }
-
-// ==================== SELECTION MANAGEMENT ====================
-
-/**
-
-- Update table selection with validation
-  */
-  private updateSelection(newSelection: any[], reason: string): void {
-  const validatedSelection = this.validateSelection(newSelection);
-
-```
-this.log(`Updating selection (${reason}): ${validatedSelection.length} items`);
-
-this.table.selection = [...validatedSelection];
-this.table.selectionChange.emit(this.table.selection);
-```
-
-}
-
-/**
-
-- Validate selection against selectable items
-  */
-  private validateSelection(selection: any[]): any[] {
-  if (!selection?.length) return [];
-
-```
-const selectableItems = this.getSelectableItems();
-const selectableIds = new Set(
-  selectableItems.map(item => this.getItemId(item)).filter(id => id !== null)
+// Find all enabled checkboxes
+const checkboxes = this.element.nativeElement.querySelectorAll(
+  'tbody input[type="checkbox"]'
 );
 
-return selection.filter(item => {
-  const itemId = this.getItemId(item);
-  return itemId !== null && selectableIds.has(itemId);
+const enabledItems: any[] = [];
+
+checkboxes.forEach((checkbox: HTMLInputElement, index: number) => {
+  if (!checkbox.disabled && this.table.value[index]) {
+    enabledItems.push(this.table.value[index]);
+  }
 });
-```
 
-}
+// Update selection
+this.table.selection = enabledItems;
+this.table.selectionChange.emit(this.table.selection);
 
-/**
-
-- Clean up initial selection on startup
-  */
-  private cleanupInitialSelection(): void {
-  if (this.table.selection?.length) {
-  const validSelection = this.validateSelection(this.table.selection);
-  if (validSelection.length !== this.table.selection.length) {
-  this.updateSelection(validSelection, ‘INITIAL_CLEANUP’);
-  }
-  }
-  }
-
-// ==================== UTILITY METHODS ====================
-
-/**
-
-- Get item ID using the configured ID key
-  */
-  private getItemId(item: any): string | number | null {
-  if (!item || typeof item !== ‘object’) return null;
-
-```
-const id = item[this.idKey];
-return (typeof id === 'string' || typeof id === 'number') ? id : null;
-```
-
-}
-
-/**
-
-- Compare two items for equality
-  */
-  private itemsEqual(item1: any, item2: any): boolean {
-  if (this.itemComparer) {
-  return this.itemComparer(item1, item2);
-  }
-
-```
-// Default comparison by ID
-const id1 = this.getItemId(item1);
-const id2 = this.getItemId(item2);
-
-return id1 !== null && id2 !== null && id1 === id2;
-```
-
-}
-
-/**
-
-- Emit header checkbox toggle event
-  */
-  private emitHeaderCheckboxEvent(event: Event, checked: boolean): void {
-  this.table.onHeaderCheckboxToggle.emit({
+// Emit header checkbox event
+this.table.onHeaderCheckboxToggle.emit({
   originalEvent: event,
-  checked: checked
-  });
-  }
+  checked: true
+});
 
-/**
-
-- Update PrimeNG internal state
-  */
-  private updateTableInternalState(): void {
-  if (this.table.updateSelectionKeys) {
+// Update PrimeNG internal state
+if (this.table.updateSelectionKeys) {
   this.table.updateSelectionKeys();
-  }
-
-```
-if (this.table.tableService?.onSelectionChange) {
-  this.table.tableService.onSelectionChange();
 }
 ```
 
 }
 
-/**
-
-- Fallback to original PrimeNG method
-  */
-  private fallbackToOriginalMethod(event: Event, checked: boolean): void {
-  this.log(‘Falling back to original method’);
-  if (this.originalToggleRowsWithCheckbox) {
-  this.originalToggleRowsWithCheckbox(event, checked);
-  }
-  }
-
-// ==================== MONITORING & CLEANUP ====================
-
-/**
-
-- Setup debounced selection monitoring
-  */
-  private setupSelectionDebouncing(): void {
-  this.selectionChange$
-  .pipe(
-  takeUntil(this.destroy$),
-  debounceTime(50),
-  distinctUntilChanged((a, b) => a.length === b.length)
-  )
-  .subscribe(selection => {
-  this.handleSelectionChange(selection);
-  });
-  }
-
-/**
-
-- Setup selection change monitoring
-  */
-  private setupSelectionMonitoring(): void {
-  this.table.selectionChange
-  ?.pipe(takeUntil(this.destroy$))
-  .subscribe(selection => {
-  this.selectionChange$.next(selection || []);
-  });
-  }
-
-/**
-
-- Handle selection changes with validation
-  */
-  private handleSelectionChange(selection: any[]): void {
-  if (!this.isInitialized || !selection?.length) return;
+private cleanupSelection() {
+if (!this.table.selection?.length) return;
 
 ```
-const validatedSelection = this.validateSelection(selection);
-if (validatedSelection.length !== selection.length) {
-  // Use ngZone to avoid ExpressionChangedAfterItHasBeenCheckedError
-  this.ngZone.run(() => {
-    this.updateSelection(validatedSelection, 'VALIDATION_CLEANUP');
-  });
-}
-```
+// Get current enabled items
+const checkboxes = this.element.nativeElement.querySelectorAll(
+  'tbody input[type="checkbox"]'
+);
 
-}
-
-/**
-
-- Setup DOM mutation observer for dynamic content
-  */
-  private setupDOMObserver(): void {
-  if (!window.MutationObserver) return;
-
-```
-this.mutationObserver = new MutationObserver((mutations) => {
-  let shouldInvalidateCache = false;
-  
-  mutations.forEach(mutation => {
-    if (mutation.type === 'childList' || 
-        (mutation.type === 'attributes' && mutation.attributeName === 'disabled')) {
-      shouldInvalidateCache = true;
-    }
-  });
-
-  if (shouldInvalidateCache) {
-    this.invalidateCache();
+const enabledItems = new Set();
+checkboxes.forEach((checkbox: HTMLInputElement, index: number) => {
+  if (!checkbox.disabled && this.table.value?.[index]) {
+    enabledItems.add(this.table.value[index]);
   }
 });
 
-this.mutationObserver.observe(this.elementRef.nativeElement, {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ['disabled']
-});
-```
+// Filter out any disabled items from selection
+const validSelection = this.table.selection.filter(item => enabledItems.has(item));
 
-}
-
-/**
-
-- Validate configuration
-  */
-  private validateConfiguration(): void {
-  if (!this.idKey || typeof this.idKey !== ‘string’) {
-  throw new Error(‘SmartSelectionDirective: idKey must be a non-empty string’);
-  }
-
-```
-if (!this.table) {
-  throw new Error('SmartSelectionDirective: Must be used on p-table element');
+if (validSelection.length !== this.table.selection.length) {
+  this.table.selection = validSelection;
+  this.table.selectionChange.emit(this.table.selection);
 }
 ```
 
 }
-
-/**
-
-- Debug logging
-  */
-  private log(…args: any[]): void {
-  if (this.debugMode) {
-  console.log(’[SmartSelection]’, …args);
-  }
-  }
-
-/**
-
-- Cleanup resources
-  */
-  private cleanup(): void {
-  this.destroy$.next();
-  this.destroy$.complete();
-
-```
-if (this.originalToggleRowsWithCheckbox) {
-  this.table.toggleRowsWithCheckbox = this.originalToggleRowsWithCheckbox;
 }
 
-if (this.mutationObserver) {
-  this.mutationObserver.disconnect();
-  this.mutationObserver = null;
-}
+/*
+USAGE EXAMPLES:
 
-this.cache = null;
-this.log('Cleanup completed');
-```
+1. Basic usage (just add the directive):
+   <p-table [value]=“users” [(selection)]=“selectedUsers” appSelectionFix>
 
-}
-}
+  <ng-template pTemplate="body" let-user>
+    <tr>
+      <td>
+        <p-tableCheckbox [value]="user" [disabled]="user.inactive"></p-tableCheckbox>
+      </td>
+      <td>{{user.name}}</td>
+    </tr>
+  </ng-template>
+</p-table>
 
-// Export for easy importing
-export { SmartSelectionDirective };
+1. Works with any disabled logic:
+   <p-tableCheckbox [value]=“item” [disabled]=“item.status === ‘locked’”></p-tableCheckbox>
+1. Module registration:
+   @NgModule({
+   declarations: [SelectionFixDirective],
+   // …
+   })
+   export class YourModule { }
 
-/**
-
-- USAGE EXAMPLES:
-- 
-- 1. Basic Usage (most common):
-- ```html
-  
-  ```
-- <p-table
-- [value]=“users”
-- [(selection)]=“selectedUsers”
-- appSmartSelection
-- idKey=“id”>
-- 
-- <ng-template pTemplate="body" let-user>
-- ```
-  <tr>
-  ```
-- ```
-    <td>
-  ```
-- ```
-      <p-tableCheckbox 
-  ```
-- ```
-        [value]="user" 
-  ```
-- ```
-        [disabled]="user.status === 'inactive'">
-  ```
-- ```
-      </p-tableCheckbox>
-  ```
-- ```
-    </td>
-  ```
-- ```
-    <td>{{user.name}}</td>
-  ```
-- ```
-  </tr>
-  ```
-- </ng-template>
-- </p-table>
-- ```
-  
-  ```
-- 
-- 1. Custom ID property:
-- ```html
-  
-  ```
-- <p-table appSmartSelection idKey="userId">
-- ```
-  
-  ```
-- 
-- 1. With debugging enabled:
-- ```html
-  
-  ```
-- <p-table appSmartSelection idKey=“id” [debugMode]=“true”>
-- ```
-  
-  ```
-- 
-- 1. Custom item comparison:
-- ```html
-  
-  ```
-- <p-table appSmartSelection idKey=“id” [itemComparer]=“customComparer”>
-- ```
-  
-  ```
-- 
-- ```typescript
-  
-  ```
-- customComparer = (item1: any, item2: any): boolean => {
-- return item1.id === item2.id && item1.version === item2.version;
-- }
-- ```
-  
-  ```
-- 
-- 1. Performance tuning:
-- ```html
-  
-  ```
-- <p-table appSmartSelection idKey=“id” [cacheTimeout]=“1000”>
-- ```
-  
-  ```
-- 
-- COMPONENT EXAMPLE:
-- ```typescript
-  
-  ```
-- @Component({
-- template: `
-- ```
-  <p-table 
-  ```
-- ```
-    [value]="products" 
-  ```
-- ```
-    [(selection)]="selectedProducts"
-  ```
-- ```
-    appSmartSelection
-  ```
-- ```
-    idKey="productId">
-  ```
-- 
-- ```
-    <ng-template pTemplate="header">
-  ```
-- ```
-      <tr>
-  ```
-- ```
-        <th><p-tableHeaderCheckbox></p-tableHeaderCheckbox></th>
-  ```
-- ```
-        <th>Name</th>
-  ```
-- ```
-        <th>Status</th>
-  ```
-- ```
-      </tr>
-  ```
-- ```
-    </ng-template>
-  ```
-- 
-- ```
-    <ng-template pTemplate="body" let-product>
-  ```
-- ```
-      <tr>
-  ```
-- ```
-        <td>
-  ```
-- ```
-          <p-tableCheckbox 
-  ```
-- ```
-            [value]="product" 
-  ```
-- ```
-            [disabled]="!product.available">
-  ```
-- ```
-          </p-tableCheckbox>
-  ```
-- ```
-        </td>
-  ```
-- ```
-        <td>{{product.name}}</td>
-  ```
-- ```
-        <td>{{product.status}}</td>
-  ```
-- ```
-      </tr>
-  ```
-- ```
-    </ng-template>
-  ```
-- ```
-  </p-table>
-  ```
-- `
-- })
-- export class ProductListComponent {
-- products = [
-- ```
-  { productId: 1, name: 'Widget A', available: true, status: 'Active' },
-  ```
-- ```
-  { productId: 2, name: 'Widget B', available: false, status: 'Inactive' },
-  ```
-- ```
-  { productId: 3, name: 'Widget C', available: true, status: 'Active' }
-  ```
-- ];
-- 
-- selectedProducts: any[] = [];
-- }
-- ```
-  
-  ```
-
+That’s it! No configuration needed.
 */
