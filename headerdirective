@@ -9,58 +9,51 @@ import { takeUntil } from 'rxjs/operators';
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
-  private originalToggleAll?: Function;
-  private originalUpdateSelectionState?: Function;
+  private checkInterval?: any;
 
   constructor(@Host() private table: Table) {}
 
   ngOnInit() {
-    // Store original functions
-    this.originalToggleAll = this.table.toggleAll?.bind(this.table);
-    this.originalUpdateSelectionState = (this.table as any).updateSelectionState?.bind(this.table);
-
-    // Override toggleAll to handle disabled items properly
-    this.table.toggleAll = (event: any) => {
-      this.handleToggleAll(event);
-    };
-
-    // Override updateSelectionState to keep header enabled
-    if ((this.table as any).updateSelectionState) {
-      (this.table as any).updateSelectionState = () => {
-        // Call original
-        if (this.originalUpdateSelectionState) {
-          this.originalUpdateSelectionState();
-        }
-        // Then fix header state
-        this.fixHeaderState();
-      };
+    // Listen to header checkbox toggle events
+    if (this.table.onHeaderCheckboxToggle) {
+      this.table.onHeaderCheckboxToggle.pipe(takeUntil(this.destroy$)).subscribe((event) => {
+        // Prevent default behavior
+        event.originalEvent?.preventDefault();
+        event.originalEvent?.stopPropagation();
+        
+        // Handle our custom toggle
+        this.handleHeaderToggle(event.checked);
+      });
     }
 
-    // Monitor selection changes
+    // Clean selection when it changes
     if (this.table.selectionChange) {
-      this.table.selectionChange
-        .pipe(takeUntil(this.destroy$))
-        .subscribe(() => {
-          this.cleanSelection();
-          this.fixHeaderState();
-        });
+      this.table.selectionChange.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        this.removeDisabledFromSelection();
+        this.updateHeaderState();
+      });
     }
   }
 
   ngAfterViewInit() {
-    // Initial fix
+    // Initial setup
     setTimeout(() => {
-      this.cleanSelection();
-      this.fixHeaderState();
+      this.removeDisabledFromSelection();
+      this.updateHeaderState();
     }, 0);
 
-    // Fix after table operations
+    // Keep header enabled
+    this.checkInterval = setInterval(() => {
+      this.ensureHeaderEnabled();
+    }, 100);
+
+    // Update after table changes
     [this.table.onPage, this.table.onSort, this.table.onFilter].forEach(event => {
       if (event) {
         event.pipe(takeUntil(this.destroy$)).subscribe(() => {
           setTimeout(() => {
-            this.cleanSelection();
-            this.fixHeaderState();
+            this.removeDisabledFromSelection();
+            this.updateHeaderState();
           }, 0);
         });
       }
@@ -68,130 +61,104 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   ngOnDestroy() {
-    // Restore original functions
-    if (this.originalToggleAll) {
-      this.table.toggleAll = this.originalToggleAll;
-    }
-    if (this.originalUpdateSelectionState) {
-      (this.table as any).updateSelectionState = this.originalUpdateSelectionState;
-    }
-    
     this.destroy$.next();
     this.destroy$.complete();
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+    }
   }
 
-  private handleToggleAll(event: any) {
-    const data = this.getTableData();
+  private handleHeaderToggle(checked: boolean) {
+    const data = this.getData();
     if (!data || data.length === 0) return;
 
-    // Get only enabled items
-    const enabledItems = this.getEnabledItems(data);
-    if (enabledItems.length === 0) return;
-
-    // Check if all enabled items are selected
-    const allSelected = this.areAllEnabledSelected(enabledItems);
-
-    // Update selection
-    if (allSelected) {
+    // Get enabled items only
+    const enabledItems = data.filter(item => !this.isDisabled(item));
+    
+    if (checked) {
+      // Select all enabled items
+      this.table.selection = [...enabledItems];
+    } else {
       // Deselect all
       this.table.selection = [];
-    } else {
-      // Select all enabled
-      this.table.selection = [...enabledItems];
     }
 
-    // Emit change
-    this.table.onHeaderCheckboxToggle.emit({
-      originalEvent: event,
-      checked: !allSelected
-    });
-
+    // Emit the selection change
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update table state
-    this.table.preventSelectionSetterPropagation = true;
-    this.table.updateSelectionKeys();
-    this.table.preventSelectionSetterPropagation = false;
+    // Update selection keys for PrimeNG internal state
+    this.updateSelectionKeys();
   }
 
-  private getTableData(): any[] {
-    // Use filtered data if available, otherwise use regular data
+  private getData(): any[] {
     return this.table.filteredValue || this.table.value || [];
   }
 
-  private getEnabledItems(data: any[]): any[] {
-    // Filter out items that should be disabled
-    return data.filter(item => !this.isItemDisabled(item));
+  private isDisabled(item: any): boolean {
+    // Your business logic for disabled items
+    return item.disabled === true || item.selectable === false;
   }
 
-  private isItemDisabled(item: any): boolean {
-    // Check if item should be disabled based on your business logic
-    if (item.disabled === true) return true;
-    if (item.selectable === false) return true;
-    
-    // Check if table has a custom function for this
-    if (typeof (this.table as any).isRowSelectable === 'function') {
-      return !(this.table as any).isRowSelectable(item);
-    }
-    
-    return false;
-  }
-
-  private areAllEnabledSelected(enabledItems: any[]): boolean {
-    if (!this.table.selection || !Array.isArray(this.table.selection)) {
-      return false;
-    }
-    
-    return enabledItems.every(item => 
-      this.table.selection.some(selected => this.equals(item, selected))
-    );
-  }
-
-  private cleanSelection() {
+  private removeDisabledFromSelection() {
     if (!this.table.selection || !Array.isArray(this.table.selection)) return;
 
-    const data = this.getTableData();
-    const enabledItems = this.getEnabledItems(data);
+    const data = this.getData();
+    const enabledItems = data.filter(item => !this.isDisabled(item));
     
-    // Remove disabled items from selection
+    // Filter out disabled items from selection
     const cleaned = this.table.selection.filter(selected =>
       enabledItems.some(enabled => this.equals(selected, enabled))
     );
 
     if (cleaned.length !== this.table.selection.length) {
       this.table.selection = cleaned;
-      this.table.updateSelectionKeys();
+      this.updateSelectionKeys();
     }
   }
 
-  private fixHeaderState() {
-    // Access the header checkbox through the table's property
-    const headerCheckbox = (this.table as any).headerCheckbox;
-    if (!headerCheckbox) return;
-
-    const data = this.getTableData();
-    const hasData = data && data.length > 0;
-
-    // Keep header enabled if there's data
-    if (hasData) {
-      headerCheckbox.disabled = false;
-      
-      // Update checked/indeterminate state
-      const enabledItems = this.getEnabledItems(data);
-      const selectedCount = this.table.selection?.length || 0;
-      
-      if (selectedCount === 0) {
-        headerCheckbox.checked = false;
-        headerCheckbox.updateCheckboxState(false, false);
-      } else if (selectedCount === enabledItems.length && enabledItems.length > 0) {
-        headerCheckbox.checked = true;
-        headerCheckbox.updateCheckboxState(true, false);
-      } else {
-        headerCheckbox.checked = false;
-        headerCheckbox.updateCheckboxState(false, true);
+  private updateSelectionKeys() {
+    // Update PrimeNG's internal selection keys
+    if (this.table.dataKey) {
+      const keys: any = {};
+      if (this.table.selection && Array.isArray(this.table.selection)) {
+        this.table.selection.forEach(item => {
+          const key = this.resolveFieldData(item, this.table.dataKey);
+          if (key) {
+            keys[key] = 1;
+          }
+        });
       }
+      (this.table as any).selectionKeys = keys;
+    }
+  }
+
+  private ensureHeaderEnabled() {
+    // Keep header checkbox enabled if there's data
+    const hasData = this.getData().length > 0;
+    
+    if (hasData && (this.table as any).selectAllCheckbox) {
+      const headerCheckbox = (this.table as any).selectAllCheckbox;
+      if (headerCheckbox && headerCheckbox.disabled) {
+        headerCheckbox.disabled = false;
+      }
+    }
+  }
+
+  private updateHeaderState() {
+    // Update header checkbox checked/indeterminate state
+    const data = this.getData();
+    const enabledItems = data.filter(item => !this.isDisabled(item));
+    const selectedCount = this.table.selection?.length || 0;
+    
+    // Set the allChecked property that PrimeNG uses
+    if (selectedCount === 0) {
+      (this.table as any).allChecked = false;
+    } else if (selectedCount === enabledItems.length && enabledItems.length > 0) {
+      (this.table as any).allChecked = true;
+    } else {
+      (this.table as any).allChecked = false;
     }
   }
 
@@ -205,7 +172,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       return a.entityId === b.entityId && a.entityType === b.entityType;
     }
     
-    // Use table's dataKey if available
+    // Use table's dataKey if set
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(a, this.table.dataKey);
       const key2 = this.resolveFieldData(b, this.table.dataKey);
@@ -213,8 +180,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     }
     
     // Check common ID fields
-    const idFields = ['id', 'ID', '_id'];
-    for (const field of idFields) {
+    for (const field of ['id', 'ID', '_id']) {
       if (a[field] !== undefined && b[field] !== undefined) {
         return a[field] === b[field];
       }
@@ -224,7 +190,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private resolveFieldData(data: any, field: string): any {
-    if (field.indexOf('.') === -1) {
+    if (!field || field.indexOf('.') === -1) {
       return data[field];
     }
     
