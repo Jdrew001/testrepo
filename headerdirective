@@ -286,7 +286,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
             box.classList.remove('p-highlight');
             const icon = box.querySelector('.p-checkbox-icon');
             if (icon) {
-              icon.classList.remove('pi-check');
+              icon.classList.remove('pi', 'pi-check', 'pi-minus');
             }
           }
         }
@@ -362,7 +362,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           box.classList.add('p-highlight');
           const icon = box.querySelector('.p-checkbox-icon');
           if (icon) {
-            icon.classList.add('pi-check');
+            icon.classList.add('pi', 'pi-check');
             icon.classList.remove('pi-minus');
           }
         } else if (headerCheckbox.indeterminate) {
@@ -370,13 +370,13 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           const icon = box.querySelector('.p-checkbox-icon');
           if (icon) {
             icon.classList.remove('pi-check');
-            icon.classList.add('pi-minus');
+            icon.classList.add('pi', 'pi-minus');
           }
         } else {
           box.classList.remove('p-highlight');
           const icon = box.querySelector('.p-checkbox-icon');
           if (icon) {
-            icon.classList.remove('pi-check', 'pi-minus');
+            icon.classList.remove('pi', 'pi-check', 'pi-minus');
           }
         }
       }
