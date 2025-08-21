@@ -128,10 +128,21 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       setTimeout(() => {
         const checkbox = this.getHeaderCheckbox();
         if (checkbox) {
+          // Ensure it's enabled before attaching listeners
+          checkbox.disabled = false;
           this.attachHeaderCheckboxListeners(checkbox);
         }
       }, 50);
       return;
+    }
+
+    // Ensure the header checkbox is enabled
+    headerCheckbox.disabled = false;
+    
+    // Also ensure the p-checkbox wrapper is not disabled
+    const pCheckbox = headerCheckbox.closest('.p-checkbox');
+    if (pCheckbox) {
+      pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
     }
 
     this.attachHeaderCheckboxListeners(headerCheckbox);
@@ -344,32 +355,34 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     });
 
-    // Update header checkbox state
+    // Always keep header checkbox enabled, regardless of row states
+    headerCheckbox.disabled = false;
+
+    // Update header checkbox state based on selection
     if (enabledCount === 0) {
-      // No enabled checkboxes - keep header enabled but unchecked
+      // No enabled checkboxes - header stays enabled but unchecked
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = false;
-      headerCheckbox.disabled = false; // Keep it enabled
     } else if (selectedEnabledCount === enabledCount && selectedEnabledCount > 0) {
       // All enabled items are selected
       headerCheckbox.checked = true;
       headerCheckbox.indeterminate = false;
-      headerCheckbox.disabled = false; // Keep it enabled
     } else if (selectedEnabledCount > 0) {
       // Some enabled items are selected
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = true;
-      headerCheckbox.disabled = false; // Keep it enabled
     } else {
       // No items are selected
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = false;
-      headerCheckbox.disabled = false; // Keep it enabled
     }
 
     // Also update the visual state of p-checkbox component if it exists
     const pCheckbox = headerCheckbox.closest('.p-checkbox');
     if (pCheckbox) {
+      // Ensure the p-checkbox wrapper is not disabled
+      pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
+      
       const box = pCheckbox.querySelector('.p-checkbox-box');
       if (box) {
         // Ensure the checkbox box is not disabled
@@ -400,6 +413,13 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         }
       }
     }
+
+    // Double-check the header checkbox stays enabled
+    setTimeout(() => {
+      if (headerCheckbox.disabled) {
+        headerCheckbox.disabled = false;
+      }
+    }, 0);
   }
 
   private isItemSelected(item: any): boolean {
