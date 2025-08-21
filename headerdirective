@@ -68,6 +68,19 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           }, 100);
         });
     }
+
+    // Also listen for filter changes if filtering is used
+    if (this.table.onFilter) {
+      this.table.onFilter
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(() => {
+          setTimeout(() => {
+            this.interceptHeaderCheckbox();
+            this.updateHeaderCheckboxState();
+            this.uncheckDisabledCheckboxes();
+          }, 100);
+        });
+    }
   }
 
   ngOnDestroy() {
@@ -213,30 +226,33 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const enabledItems: any[] = [];
     const bodyCheckboxes = this.getBodyCheckboxes();
 
-    this.table.value.forEach((item, index) => {
-      const checkbox = bodyCheckboxes[index];
-      // Check if checkbox exists and is not disabled
-      if (checkbox && !checkbox.disabled) {
-        enabledItems.push(item);
-      } else if (!checkbox) {
-        // If no checkbox found (might be on different page), check if row is selectable
-        // You might need to adjust this based on your isRowSelectable logic
-        if (this.isRowSelectable(item, index)) {
+    // If we have checkboxes in the DOM, use them to determine what's enabled
+    if (bodyCheckboxes.length > 0) {
+      this.table.value.forEach((item, index) => {
+        const checkbox = bodyCheckboxes[index];
+        // Only add items that have enabled checkboxes
+        if (checkbox && !checkbox.disabled) {
           enabledItems.push(item);
         }
-      }
-    });
+      });
+    } else {
+      // If no checkboxes found (might be virtual scrolling or not rendered yet),
+      // we'll need to check the actual data
+      // In this case, we can't determine disabled state, so include all
+      return [...this.table.value];
+    }
 
     return enabledItems;
   }
 
   private isRowSelectable(item: any, index: number): boolean {
-    // If table has a custom selectable function, use it
-    if (typeof this.table.isRowSelectable === 'function') {
-      return this.table.isRowSelectable({ data: item, index: index });
+    // Check if there's a rowSelectable property (it's an @Input on p-table)
+    // This would be a function that returns boolean
+    if (this.table.rowSelectable && typeof this.table.rowSelectable === 'function') {
+      return this.table.rowSelectable({ data: item, index: index });
     }
     
-    // Default to true if no custom logic
+    // Default to true - the row is selectable unless there's a disabled checkbox
     return true;
   }
 
