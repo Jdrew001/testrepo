@@ -77,6 +77,11 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (this.table.updateSelectionKeys) {
       this.table.updateSelectionKeys();
     }
+
+    // Force header checkbox to be checked
+    setTimeout(() => {
+      this.updateHeaderCheckboxState(true);
+    }, 0);
   }
 
   private cleanupSelection() {
@@ -100,6 +105,53 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (validSelection.length !== this.table.selection.length) {
       this.table.selection = validSelection;
       this.table.selectionChange.emit(this.table.selection);
+      
+      // Update header checkbox state after cleanup
+      setTimeout(() => {
+        this.updateHeaderCheckboxState();
+      }, 0);
     }
+  }
+
+  private updateHeaderCheckboxState(forceChecked?: boolean) {
+    // Find header checkbox
+    const headerCheckbox = this.element.nativeElement.querySelector(
+      'thead input[type="checkbox"], thead .p-checkbox-box'
+    );
+
+    if (headerCheckbox) {
+      const totalEnabled = this.getTotalEnabledItems();
+      const selectedCount = this.table.selection?.length || 0;
+      
+      if (forceChecked === true) {
+        // Force checked state
+        headerCheckbox.checked = true;
+        if (headerCheckbox.indeterminate !== undefined) {
+          headerCheckbox.indeterminate = false;
+        }
+      } else {
+        // Set proper state based on selection
+        const allSelected = selectedCount > 0 && selectedCount === totalEnabled;
+        const someSelected = selectedCount > 0 && selectedCount < totalEnabled;
+        
+        headerCheckbox.checked = allSelected;
+        if (headerCheckbox.indeterminate !== undefined) {
+          headerCheckbox.indeterminate = someSelected;
+        }
+      }
+    }
+  }
+
+  private getTotalEnabledItems(): number {
+    const checkboxes = this.element.nativeElement.querySelectorAll(
+      'tbody input[type="checkbox"]'
+    );
+    
+    let count = 0;
+    checkboxes.forEach((checkbox: HTMLInputElement) => {
+      if (!checkbox.disabled) count++;
+    });
+    
+    return count;
   }
 }
