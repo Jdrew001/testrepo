@@ -1,6 +1,7 @@
 import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from '@angular/core';
 import { Table } from 'primeng/table';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 
 @Directive({
   selector: '[appSelectionFix]'
@@ -8,7 +9,7 @@ import { Subject, takeUntil } from 'rxjs';
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
-  private headerCheckboxClickListener?: () => void;
+  private headerCheckboxClickListener?: (event: Event) => void;
 
   constructor(
     @Host() private table: Table,
@@ -54,7 +55,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
     headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
 
-    this.headerCheckboxClickListener = () => {
+    this.headerCheckboxClickListener = (event: Event) => {
       setTimeout(() => {
         this.handleHeaderCheckboxClick(newCheckbox);
       }, 0);
@@ -70,7 +71,9 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       // Force header checkbox to stay checked
       setTimeout(() => {
         checkbox.checked = true;
-        checkbox.indeterminate = false;
+        if ('indeterminate' in checkbox) {
+          checkbox.indeterminate = false;
+        }
       }, 0);
     } else {
       // Deselect all
@@ -163,19 +166,27 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (enabledCount === 0) {
       // No enabled checkboxes
       headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = false;
+      if ('indeterminate' in headerCheckbox) {
+        headerCheckbox.indeterminate = false;
+      }
     } else if (selectedEnabledCount === enabledCount) {
       // All enabled items are selected
       headerCheckbox.checked = true;
-      headerCheckbox.indeterminate = false;
+      if ('indeterminate' in headerCheckbox) {
+        headerCheckbox.indeterminate = false;
+      }
     } else if (selectedEnabledCount > 0) {
       // Some enabled items are selected
       headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = true;
+      if ('indeterminate' in headerCheckbox) {
+        headerCheckbox.indeterminate = true;
+      }
     } else {
       // No items are selected
       headerCheckbox.checked = false;
-      headerCheckbox.indeterminate = false;
+      if ('indeterminate' in headerCheckbox) {
+        headerCheckbox.indeterminate = false;
+      }
     }
     }
   }
