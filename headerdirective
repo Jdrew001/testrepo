@@ -1,562 +1,170 @@
-  private startHeaderMonitoring() {
-    // Clear any existing interval
-    if (this.headerCheckboxInterval) {
-      clearInterval(this.headerCheckboxInterval);
-    }
-
-    // Aggressively monitor header checkbox state to keep it ALWAYS enabled
-    this.ngZone.runOutsideAngular(() => {import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2, NgZone } from '@angular/core';
+import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from '@angular/core';
 import { Table } from 'primeng/table';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 
 @Directive({
   selector: '[appSelectionFix]'
 })
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
-  private destroy$ = new Subject<void>();
-  private headerCheckboxInterval?: any;
-  private originalToggleAllFn?: Function;
-  private isProcessingToggle = false;
+  private interval?: any;
 
   constructor(
     @Host() private table: Table,
-    private element: ElementRef,
-    private renderer: Renderer2,
-    private ngZone: NgZone
+    private el: ElementRef
   ) {}
 
   ngOnInit() {
-    // Store the original toggleAll function
-    this.originalToggleAllFn = (this.table as any).toggleAll?.bind(this.table);
-    
-    // Override the toggleAll method to filter disabled items
-    if ((this.table as any).toggleAll) {
-      (this.table as any).toggleAll = (event: any) => {
-        this.customToggleAll(event);
-      };
-    }
-
-    // Monitor selection changes
-    if (this.table.selectionChange) {
-      this.table.selectionChange
-        .pipe(takeUntil(this.destroy$))
-        .subscribe(() => {
-          if (!this.isProcessingToggle) {
-            requestAnimationFrame(() => {
-              this.cleanupDisabledFromSelection();
-              this.updateHeaderCheckbox();
-            });
-          }
-        });
-    }
+    // Override toggleAll to handle disabled items
+    (this.table as any).toggleAll = () => this.toggleAll();
   }
 
   ngAfterViewInit() {
-    // Initial setup after view is ready
-    setTimeout(() => {
-      this.initializeHeaderFix();
-    }, 100);
-
-    // Re-initialize after table operations
-    this.setupTableEventHandlers();
+    // Keep header enabled
+    this.interval = setInterval(() => this.fixHeader(), 100);
+    
+    // Fix after pagination/sort/filter
+    [this.table.onPage, this.table.onSort, this.table.onFilter].forEach(e => {
+      e?.subscribe(() => setTimeout(() => this.fixHeader(), 100));
+    });
   }
 
   ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
+    if (this.interval) clearInterval(this.interval);
+  }
+
+  private fixHeader() {
+    const header = this.getHeader();
+    if (!header) return;
+
+    const hasData = (this.table.value || []).length > 0;
     
-    if (this.headerCheckboxInterval) {
-      clearInterval(this.headerCheckboxInterval);
-    }
-
-    // Restore original function if needed
-    if (this.originalToggleAllFn && (this.table as any).toggleAll) {
-      (this.table as any).toggleAll = this.originalToggleAllFn;
-    }
-  }
-
-  private setupTableEventHandlers() {
-    // Re-initialize after pagination
-    if (this.table.onPage) {
-      this.table.onPage.pipe(takeUntil(this.destroy$)).subscribe(() => {
-        // Use longer timeout for page changes to ensure DOM is ready
-        setTimeout(() => {
-          this.initializeHeaderFix();
-        }, 200);
-      });
-    }
-
-    // Re-initialize after sorting
-    if (this.table.onSort) {
-      this.table.onSort.pipe(takeUntil(this.destroy$)).subscribe(() => {
-        setTimeout(() => {
-          this.initializeHeaderFix();
-        }, 150);
-      });
-    }
-
-    // Re-initialize after filtering
-    if (this.table.onFilter) {
-      this.table.onFilter.pipe(takeUntil(this.destroy$)).subscribe(() => {
-        setTimeout(() => {
-          this.initializeHeaderFix();
-        }, 150);
-      });
-    }
-
-    // Handle lazy loading
-    if (this.table.onLazyLoad) {
-      this.table.onLazyLoad.pipe(takeUntil(this.destroy$)).subscribe(() => {
-        setTimeout(() => {
-          this.initializeHeaderFix();
-        }, 200);
-      });
-    }
-  }
-
-  private initializeHeaderFix() {
-    this.enforceDisabledCheckboxes();
-    this.cleanupDisabledFromSelection();
-    this.updateHeaderCheckbox();
-    this.startHeaderMonitoring();
-  }
-
-  private startHeaderMonitoring() {
-    // Clear any existing interval
-    if (this.headerCheckboxInterval) {
-      clearInterval(this.headerCheckboxInterval);
-    }
-
-    // Aggressively monitor header checkbox state to keep it ALWAYS enabled
-    this.ngZone.runOutsideAngular(() => {
-      this.headerCheckboxInterval = setInterval(() => {
-        const headerEl = this.getHeaderCheckboxElement();
-        if (headerEl) {
-          const checkbox = headerEl.querySelector('input[type="checkbox"]');
-          if (checkbox) {
-            const inputCheckbox = checkbox as HTMLInputElement;
-            
-            // Get total data count
-            const allData = this.table.filteredValue || this.table.value || [];
-            
-            // ALWAYS keep header enabled if there's any data
-            if (allData.length > 0) {
-              if (inputCheckbox.disabled) {
-                this.ngZone.run(() => {
-                  this.renderer.setProperty(checkbox, 'disabled', false);
-                  this.updateHeaderVisualState();
-                });
-              }
-            } else {
-              // Only disable if there's truly no data
-              if (!inputCheckbox.disabled) {
-                this.ngZone.run(() => {
-                  this.renderer.setProperty(checkbox, 'disabled', true);
-                  this.updateHeaderVisualState();
-                });
-              }
-            }
-          }
-        }
-      }, 50); // More aggressive checking every 50ms
-    });
-  }
-
-  private customToggleAll(event: any) {
-    this.isProcessingToggle = true;
-
-    // Get ALL data (not just current page)
-    const allData = this.table.filteredValue || this.table.value || [];
-    
-    // We need to determine which items across ALL pages are enabled
-    // For items not on current page, we'll assume they're enabled unless we have info otherwise
-    const currentPageData = this.getCurrentPageData();
-    const currentPageCheckboxes = this.getBodyCheckboxes();
-    
-    // Build a map of disabled items from current page
-    const disabledItemsMap = new Map();
-    currentPageData.forEach((item, index) => {
-      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
-        // Mark this item as disabled
-        disabledItemsMap.set(this.getItemKey(item), true);
+    // Enable if data exists
+    if (hasData) {
+      header.disabled = false;
+      const wrapper = header.closest('.p-checkbox');
+      if (wrapper) {
+        wrapper.classList.remove('p-checkbox-disabled', 'p-disabled');
       }
-    });
+    }
+    
+    this.updateHeaderState();
+  }
 
-    // Filter all data to exclude disabled items
-    const allEnabledItems = allData.filter(item => {
-      const itemKey = this.getItemKey(item);
-      return !disabledItemsMap.has(itemKey);
-    });
+  private toggleAll() {
+    const allData = this.table.value || [];
+    if (!allData.length) return;
 
-    // Check if all enabled items are currently selected
-    const allEnabledSelected = allEnabledItems.every(item => this.isItemSelected(item));
+    const enabledItems = this.getEnabledItems();
+    const allSelected = enabledItems.every(item => this.isSelected(item));
 
     // Toggle selection
-    if (!allEnabledSelected) {
-      // Select all enabled items across ALL pages
-      this.table.selection = [...allEnabledItems];
-    } else {
-      // Deselect all
-      this.table.selection = [];
-    }
+    this.table.selection = allSelected ? [] : [...enabledItems];
     
-    // Emit change
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update visual state
-    this.updateTableCheckboxes();
-    
     setTimeout(() => {
-      this.updateHeaderCheckbox();
-      this.isProcessingToggle = false;
-    }, 50);
+      this.updateHeaderState();
+      this.updateBodyCheckboxes();
+    }, 0);
   }
 
-  private getItemKey(item: any): string {
-    // Handle composite key of entityId + entityType
+  private getEnabledItems(): any[] {
+    const allData = this.table.value || [];
+    const currentPage = this.getCurrentPage();
+    const bodyCheckboxes = this.getBodyCheckboxes();
+    
+    // Find disabled items on current page
+    const disabledKeys = new Set<string>();
+    currentPage.forEach((item, i) => {
+      if (bodyCheckboxes[i]?.disabled) {
+        disabledKeys.add(this.getKey(item));
+      }
+    });
+
+    // Return all items except disabled ones
+    return allData.filter(item => !disabledKeys.has(this.getKey(item)));
+  }
+
+  private getCurrentPage(): any[] {
+    if (this.table.paginator && this.table.rows) {
+      const first = this.table.first || 0;
+      return (this.table.value || []).slice(first, first + this.table.rows);
+    }
+    return this.table.value || [];
+  }
+
+  private updateHeaderState() {
+    const header = this.getHeader();
+    if (!header) return;
+
+    const enabled = this.getEnabledItems();
+    const selected = this.table.selection?.length || 0;
+
+    if (selected === 0) {
+      header.checked = false;
+      header.indeterminate = false;
+    } else if (selected === enabled.length && enabled.length > 0) {
+      header.checked = true;
+      header.indeterminate = false;
+    } else {
+      header.checked = false;
+      header.indeterminate = true;
+    }
+  }
+
+  private updateBodyCheckboxes() {
+    const currentPage = this.getCurrentPage();
+    const checkboxes = this.getBodyCheckboxes();
+    
+    checkboxes.forEach((cb, i) => {
+      if (i < currentPage.length && !cb.disabled) {
+        cb.checked = this.isSelected(currentPage[i]);
+      }
+    });
+  }
+
+  private isSelected(item: any): boolean {
+    if (!this.table.selection) return false;
+    return Array.isArray(this.table.selection) 
+      ? this.table.selection.some(s => this.equals(item, s))
+      : this.equals(item, this.table.selection);
+  }
+
+  private equals(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    
+    // Handle entityId + entityType composite key
+    if (a.entityId !== undefined && a.entityType !== undefined) {
+      return a.entityId === b.entityId && a.entityType === b.entityType;
+    }
+    
+    // Check common ID fields
+    for (const field of ['id', 'ID', '_id']) {
+      if (a[field] !== undefined && b[field] !== undefined) {
+        return a[field] === b[field];
+      }
+    }
+    return false;
+  }
+
+  private getKey(item: any): string {
     if (item.entityId !== undefined && item.entityType !== undefined) {
       return `${item.entityType}_${item.entityId}`;
     }
-    
-    if (this.table.dataKey) {
-      const key = this.resolveFieldData(item, this.table.dataKey);
-      return String(key);
+    for (const field of ['id', 'ID', '_id']) {
+      if (item[field] !== undefined) return String(item[field]);
     }
-    
-    // Try common ID fields
-    const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
-    for (const prop of idProps) {
-      if (item[prop] !== undefined) {
-        return String(item[prop]);
-      }
-    }
-    
-    // Fallback to JSON string (not ideal but works)
     return JSON.stringify(item);
   }
 
-  private getCurrentPageData(): any[] {
-    // For paginated tables
-    if (this.table.paginator && this.table.rows) {
-      const first = this.table.first || 0;
-      const rows = this.table.rows;
-      return (this.table.filteredValue || this.table.value || []).slice(first, first + rows);
-    }
-    
-    // For non-paginated tables
-    return this.table.filteredValue || this.table.value || [];
-  }
-
-  private enforceDisabledCheckboxes() {
-    const checkboxes = this.getBodyCheckboxes();
-    const currentData = this.getCurrentPageData();
-    
-    checkboxes.forEach((checkbox, index) => {
-      if (index < currentData.length) {
-        const item = currentData[index];
-        
-        // Check if this row should be disabled based on your logic
-        // This is where you'd implement your business logic for disabled rows
-        const shouldBeDisabled = this.isRowDisabled(item, index);
-        
-        if (shouldBeDisabled) {
-          // Disable the checkbox
-          this.renderer.setProperty(checkbox, 'disabled', true);
-          this.renderer.setProperty(checkbox, 'checked', false);
-          
-          // Update visual state
-          const wrapper = checkbox.closest('.p-checkbox');
-          if (wrapper) {
-            this.renderer.addClass(wrapper, 'p-checkbox-disabled');
-            this.renderer.addClass(wrapper, 'p-disabled');
-            
-            const box = wrapper.querySelector('.p-checkbox-box');
-            if (box) {
-              this.renderer.addClass(box, 'p-disabled');
-              this.renderer.removeClass(box, 'p-highlight');
-            }
-          }
-        }
-      }
-    });
-  }
-
-  private isRowDisabled(item: any, index: number): boolean {
-    // Check if there's a custom disable function set on the table
-    // You might need to implement this based on your specific requirements
-    // For example, you might check a property on the item:
-    
-    if (item.disabled !== undefined) {
-      return item.disabled;
-    }
-    
-    if (item.selectable !== undefined) {
-      return !item.selectable;
-    }
-    
-    // You can add your custom logic here
-    // For example, check if the current user can select this item
-    
-    return false;
-  }
-
-  private cleanupDisabledFromSelection() {
-    if (!this.table.selection || !Array.isArray(this.table.selection)) {
-      return;
-    }
-
-    const currentData = this.getCurrentPageData();
-    const currentPageCheckboxes = this.getBodyCheckboxes();
-    
-    // Build list of disabled items on current page
-    const disabledItems: any[] = [];
-    currentData.forEach((item, index) => {
-      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
-        disabledItems.push(item);
-      }
-    });
-    
-    // Remove disabled items from selection
-    const cleanedSelection = this.table.selection.filter(selectedItem => {
-      // Check if this selected item is one of the disabled items on current page
-      return !disabledItems.some(disabledItem => this.itemsEqual(selectedItem, disabledItem));
-    });
-
-    if (cleanedSelection.length !== this.table.selection.length) {
-      this.table.selection = cleanedSelection;
-      if (this.table.selectionChange) {
-        this.table.selectionChange.emit(cleanedSelection);
-      }
-    }
-  }
-
-  private updateTableCheckboxes() {
-    const checkboxes = this.getBodyCheckboxes();
-    const currentData = this.getCurrentPageData();
-    
-    checkboxes.forEach((checkbox, index) => {
-      if (index < currentData.length) {
-        const item = currentData[index];
-        const isSelected = this.isItemSelected(item);
-        
-        if (checkbox.disabled) {
-          // Force disabled checkboxes to be unchecked
-          this.renderer.setProperty(checkbox, 'checked', false);
-        } else {
-          // Update enabled checkboxes
-          this.renderer.setProperty(checkbox, 'checked', isSelected);
-        }
-        
-        // Update visual state through PrimeNG's classes
-        const wrapper = checkbox.closest('.p-checkbox');
-        if (wrapper) {
-          const box = wrapper.querySelector('.p-checkbox-box');
-          if (box) {
-            if (isSelected && !checkbox.disabled) {
-              this.renderer.addClass(box, 'p-highlight');
-            } else {
-              this.renderer.removeClass(box, 'p-highlight');
-            }
-          }
-        }
-      }
-    });
-  }
-
-  private updateHeaderCheckbox() {
-    const headerEl = this.getHeaderCheckboxElement();
-    if (!headerEl) return;
-
-    const checkbox = headerEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    if (!checkbox) return;
-
-    // Get ALL data (across all pages)
-    const allData = this.table.filteredValue || this.table.value || [];
-    
-    // CRITICAL: Always enable header if there's data
-    if (allData.length > 0) {
-      this.renderer.setProperty(checkbox, 'disabled', false);
-    } else {
-      // Only disable when there's absolutely no data
-      this.renderer.setProperty(checkbox, 'disabled', true);
-      this.renderer.setProperty(checkbox, 'checked', false);
-      this.renderer.setProperty(checkbox, 'indeterminate', false);
-      this.updateHeaderVisualState();
-      return;
-    }
-
-    // Calculate total selection state across ALL pages
-    // We need to estimate total enabled items across all pages
-    const currentPageData = this.getCurrentPageData();
-    const currentPageCheckboxes = this.getBodyCheckboxes();
-    
-    // Count disabled on current page
-    let currentPageDisabledCount = 0;
-    currentPageData.forEach((item, index) => {
-      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
-        currentPageDisabledCount++;
-      }
-    });
-    
-    // For other pages, we can't know disabled state, so assume all are enabled
-    // This is a limitation unless we track disabled state globally
-    const currentPageEnabledCount = currentPageData.length - currentPageDisabledCount;
-    const otherPagesCount = allData.length - currentPageData.length;
-    const estimatedTotalEnabled = currentPageEnabledCount + otherPagesCount;
-
-    // Count total selected items across all pages
-    let totalSelectedCount = 0;
-    if (this.table.selection && Array.isArray(this.table.selection)) {
-      totalSelectedCount = this.table.selection.length;
-    }
-
-    // Determine header checkbox state
-    if (totalSelectedCount === 0) {
-      // Nothing selected
-      this.renderer.setProperty(checkbox, 'checked', false);
-      this.renderer.setProperty(checkbox, 'indeterminate', false);
-    } else if (totalSelectedCount >= allData.length - currentPageDisabledCount) {
-      // All possible items are selected (total minus disabled)
-      // This accounts for disabled items only on current page
-      this.renderer.setProperty(checkbox, 'checked', true);
-      this.renderer.setProperty(checkbox, 'indeterminate', false);
-    } else {
-      // Partial selection
-      this.renderer.setProperty(checkbox, 'checked', false);
-      this.renderer.setProperty(checkbox, 'indeterminate', true);
-    }
-
-    this.updateHeaderVisualState();
-  }
-
-  private updateHeaderVisualState() {
-    const headerEl = this.getHeaderCheckboxElement();
-    if (!headerEl) return;
-
-    const checkbox = headerEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    if (!checkbox) return;
-
-    const wrapper = headerEl.querySelector('.p-checkbox');
-    if (wrapper) {
-      // Get data count to determine if we should show as disabled
-      const allData = this.table.filteredValue || this.table.value || [];
-      
-      if (allData.length > 0) {
-        // ALWAYS remove disabled classes when there's data
-        this.renderer.removeClass(wrapper, 'p-checkbox-disabled');
-        this.renderer.removeClass(wrapper, 'p-disabled');
-        
-        const box = wrapper.querySelector('.p-checkbox-box');
-        if (box) {
-          this.renderer.removeClass(box, 'p-disabled');
-          
-          // Update highlight based on state
-          if (checkbox.checked || checkbox.indeterminate) {
-            this.renderer.addClass(box, 'p-highlight');
-          } else {
-            this.renderer.removeClass(box, 'p-highlight');
-          }
-          
-          // Update icon
-          const icon = box.querySelector('.p-checkbox-icon');
-          if (icon) {
-            // Clear existing classes
-            this.renderer.setAttribute(icon, 'class', 'p-checkbox-icon');
-            
-            if (checkbox.checked) {
-              this.renderer.addClass(icon, 'pi');
-              this.renderer.addClass(icon, 'pi-check');
-            } else if (checkbox.indeterminate) {
-              this.renderer.addClass(icon, 'pi');
-              this.renderer.addClass(icon, 'pi-minus');
-            } else {
-              this.renderer.addClass(icon, 'pi');
-            }
-          }
-        }
-      } else {
-        // Only show as disabled when there's no data
-        this.renderer.addClass(wrapper, 'p-checkbox-disabled');
-        this.renderer.addClass(wrapper, 'p-disabled');
-        
-        const box = wrapper.querySelector('.p-checkbox-box');
-        if (box) {
-          this.renderer.addClass(box, 'p-disabled');
-          this.renderer.removeClass(box, 'p-highlight');
-        }
-      }
-    }
-  }
-
-  private getHeaderCheckboxElement(): HTMLElement | null {
-    return this.element.nativeElement.querySelector('thead p-tableheadercheckbox') ||
-           this.element.nativeElement.querySelector('thead .p-selection-column');
+  private getHeader(): HTMLInputElement | null {
+    return this.el.nativeElement.querySelector('thead input[type="checkbox"]');
   }
 
   private getBodyCheckboxes(): HTMLInputElement[] {
-    const checkboxes = this.element.nativeElement.querySelectorAll(
-      'tbody .p-selection-column input[type="checkbox"], tbody p-tablecheckbox input[type="checkbox"]'
-    );
-    return Array.from(checkboxes);
-  }
-
-  private isItemSelected(item: any): boolean {
-    if (!this.table.selection) return false;
-    
-    if (Array.isArray(this.table.selection)) {
-      return this.table.selection.some(selectedItem => 
-        this.itemsEqual(item, selectedItem)
-      );
-    }
-    
-    return this.itemsEqual(item, this.table.selection);
-  }
-
-  private itemsEqual(item1: any, item2: any): boolean {
-    if (item1 === item2) return true;
-    if (!item1 || !item2) return false;
-    
-    // Handle composite key of entityId + entityType
-    if (item1.entityId !== undefined && item1.entityType !== undefined &&
-        item2.entityId !== undefined && item2.entityType !== undefined) {
-      return item1.entityId === item2.entityId && item1.entityType === item2.entityType;
-    }
-    
-    if (this.table.dataKey) {
-      const key1 = this.resolveFieldData(item1, this.table.dataKey);
-      const key2 = this.resolveFieldData(item2, this.table.dataKey);
-      if (key1 !== undefined && key2 !== undefined) {
-        return key1 === key2;
-      }
-    }
-    
-    const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
-    for (const prop of idProps) {
-      if (item1[prop] !== undefined && item2[prop] !== undefined) {
-        return item1[prop] === item2[prop];
-      }
-    }
-    
-    return false;
-  }
-
-  private resolveFieldData(data: any, field: string): any {
-    if (!data || !field) return undefined;
-    
-    if (field.indexOf('.') === -1) {
-      return data[field];
-    }
-    
-    const fields = field.split('.');
-    let value = data;
-    for (const f of fields) {
-      if (value == null) return undefined;
-      value = value[f];
-    }
-    return value;
+    return Array.from(this.el.nativeElement.querySelectorAll('tbody input[type="checkbox"]'));
   }
 }
