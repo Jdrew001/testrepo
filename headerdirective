@@ -1,0 +1,309 @@
+/**
+
+- Improved PrimeNG Selectable Rows Directive
+- 
+- Auto-detects disabled checkboxes without requiring a separate function
+- 
+- Usage:
+- <p-table [value]=“items” [(selection)]=“selectedItems” appSelectableRowsOnly>
+- <ng-template pTemplate="body" let-item>
+- ```
+  <tr>
+  ```
+- ```
+    <td>
+  ```
+- ```
+      <p-tableCheckbox 
+  ```
+- ```
+        [value]="item" 
+  ```
+- ```
+        [disabled]="item.disabled">  <!-- Just use your existing disabled logic -->
+  ```
+- ```
+      </p-tableCheckbox>
+  ```
+- ```
+    </td>
+  ```
+- ```
+  </tr>
+  ```
+- </ng-template>
+- </p-table>
+
+*/
+
+import {
+Directive,
+Host,
+OnInit,
+OnDestroy,
+AfterViewInit,
+ElementRef,
+Input
+} from ‘@angular/core’;
+import { Table } from ‘primeng/table’;
+import { Subject, takeUntil } from ‘rxjs’;
+
+@Directive({
+selector: ‘[appSelectableRowsOnly]’
+})
+export class SelectableRowsOnlyDirective implements OnInit, OnDestroy, AfterViewInit {
+
+/**
+
+- Optional: Property name to check for disabled state (fallback method)
+- Default: ‘disabled’
+  */
+  @Input() disabledProperty = ‘disabled’;
+
+/**
+
+- Optional: Custom function (kept for backward compatibility)
+  */
+  @Input() disabledRowChecker?: (item: any) => boolean;
+
+private destroy$ = new Subject<void>();
+private originalToggleRowsWithCheckbox: any;
+
+constructor(
+@Host() private table: Table,
+private elementRef: ElementRef
+) {}
+
+ngOnInit() {
+this.overrideSelectionMethods();
+this.setupSelectionCleanup();
+}
+
+ngAfterViewInit() {
+// Give PrimeNG time to render checkboxes
+setTimeout(() => {
+this.detectInitialState();
+}, 100);
+}
+
+ngOnDestroy() {
+this.destroy$.next();
+this.destroy$.complete();
+
+```
+if (this.originalToggleRowsWithCheckbox) {
+  this.table.toggleRowsWithCheckbox = this.originalToggleRowsWithCheckbox;
+}
+```
+
+}
+
+private detectInitialState() {
+// Clean up any initially selected disabled items
+if (this.table.selection?.length) {
+const selectableItems = this.getSelectableRows();
+const validSelection = this.table.selection.filter(item =>
+selectableItems.includes(item)
+);
+
+```
+  if (validSelection.length !== this.table.selection.length) {
+    this.updateSelection(validSelection);
+  }
+}
+```
+
+}
+
+private overrideSelectionMethods() {
+this.originalToggleRowsWithCheckbox = this.table.toggleRowsWithCheckbox?.bind(this.table);
+
+```
+this.table.toggleRowsWithCheckbox = (event: Event, check: boolean) => {
+  if (check) {
+    const selectableRows = this.getSelectableRows();
+    this.updateSelection(selectableRows);
+  } else {
+    this.updateSelection([]);
+  }
+  
+  this.table.onHeaderCheckboxToggle.emit({
+    originalEvent: event,
+    checked: check
+  });
+
+  this.updateTableState();
+};
+```
+
+}
+
+/**
+
+- Get selectable rows using multiple detection methods
+  */
+  private getSelectableRows(): any[] {
+  if (!this.table.value) return [];
+
+```
+// Method 1: Use custom function if provided
+if (this.disabledRowChecker) {
+  return this.table.value.filter(item => !this.disabledRowChecker!(item));
+}
+
+// Method 2: Auto-detect from DOM checkboxes
+const selectableFromDOM = this.getSelectableRowsFromDOM();
+if (selectableFromDOM.length > 0) {
+  return selectableFromDOM;
+}
+
+// Method 3: Check disabled property on data
+return this.table.value.filter(item => 
+  !item[this.disabledProperty]
+);
+```
+
+}
+
+/**
+
+- Auto-detect selectable rows from DOM checkbox states
+  */
+  private getSelectableRowsFromDOM(): any[] {
+  const selectableRows: any[] = [];
+
+```
+try {
+  // Find all checkbox inputs in table body
+  const checkboxes = this.elementRef.nativeElement.querySelectorAll(
+    'tbody p-tablecheckbox input[type="checkbox"], ' +
+    'tbody .p-checkbox input[type="checkbox"]'
+  );
+
+  checkboxes.forEach((checkbox: HTMLInputElement, index: number) => {
+    if (!checkbox.disabled && this.table.value[index]) {
+      selectableRows.push(this.table.value[index]);
+    }
+  });
+} catch (error) {
+  console.warn('Could not auto-detect checkbox states:', error);
+}
+
+return selectableRows;
+```
+
+}
+
+private updateSelection(newSelection: any[]) {
+this.table.selection = […newSelection];
+this.table.selectionChange.emit(this.table.selection);
+}
+
+private updateTableState() {
+if (this.table.updateSelectionKeys) {
+this.table.updateSelectionKeys();
+}
+
+```
+if (this.table.tableService?.onSelectionChange) {
+  this.table.tableService.onSelectionChange();
+}
+```
+
+}
+
+private setupSelectionCleanup() {
+this.table.selectionChange
+?.pipe(takeUntil(this.destroy$))
+.subscribe((selection: any[]) => {
+setTimeout(() => this.cleanupSelection(selection), 0);
+});
+}
+
+private cleanupSelection(selection: any[]) {
+if (!selection?.length) return;
+
+```
+const selectableRows = this.getSelectableRows();
+const validSelection = selection.filter(item => 
+  selectableRows.some(selectableItem => 
+    this.itemsEqual(item, selectableItem)
+  )
+);
+
+if (validSelection.length !== selection.length) {
+  this.updateSelection(validSelection);
+}
+```
+
+}
+
+private itemsEqual(item1: any, item2: any): boolean {
+// Simple equality check - override if you need custom comparison
+if (item1 === item2) return true;
+
+```
+// Check by ID if available
+if (item1?.id && item2?.id) {
+  return item1.id === item2.id;
+}
+
+return false;
+```
+
+}
+}
+
+/**
+
+- Usage Examples:
+- 
+- 1. Auto-detection (no extra config needed):
+- ```html
+  
+  ```
+- <p-table [value]=“items” [(selection)]=“selectedItems” appSelectableRowsOnly>
+- <ng-template pTemplate="body" let-item>
+- ```
+  <tr>
+  ```
+- ```
+    <td>
+  ```
+- ```
+      <p-tableCheckbox [value]="item" [disabled]="item.disabled">
+  ```
+- ```
+      </p-tableCheckbox>
+  ```
+- ```
+    </td>
+  ```
+- ```
+  </tr>
+  ```
+- </ng-template>
+- </p-table>
+- ```
+  
+  ```
+- 
+- 1. Custom property name:
+- ```html
+  
+  ```
+- <p-table appSelectableRowsOnly disabledProperty="isInactive">
+- ```
+  
+  ```
+- 
+- 1. Custom function (backward compatibility):
+- ```html
+  
+  ```
+- <p-table appSelectableRowsOnly [disabledRowChecker]=“myCustomFunction”>
+- ```
+  
+  ```
+
+*/
