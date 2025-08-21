@@ -1,4 +1,4 @@
-import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from '@angular/core';
+import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2 } from '@angular/core';
 import { Table } from 'primeng/table';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -9,18 +9,16 @@ import { takeUntil } from 'rxjs/operators';
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
-  private headerCheckboxClickListener?: (event: Event) => void;
-  private originalToggleAll?: Function;
+  private headerCheckboxClickListener?: () => void;
+  private headerCheckboxChangeListener?: () => void;
 
   constructor(
     @Host() private table: Table,
-    private element: ElementRef
+    private element: ElementRef,
+    private renderer: Renderer2
   ) {}
 
   ngOnInit() {
-    // Override the table's toggleAll method
-    this.overrideToggleAll();
-    
     // Monitor selection changes to clean up disabled items
     if (this.table.selectionChange) {
       this.table.selectionChange
@@ -32,23 +30,39 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           }, 0);
         });
     }
+
+    // Override updateHeaderCheckboxState if it exists
+    this.overrideHeaderCheckboxBehavior();
   }
 
   ngAfterViewInit() {
     // Setup header checkbox override and initial state
     setTimeout(() => {
-      this.setupHeaderCheckboxOverride();
+      this.interceptHeaderCheckbox();
       this.updateHeaderCheckboxState();
       // Ensure disabled checkboxes are never checked
       this.uncheckDisabledCheckboxes();
     }, 100);
 
-    // Also handle table updates
+    // Handle table updates, pagination, sorting
     if (this.table.onPage) {
       this.table.onPage
         .pipe(takeUntil(this.destroy$))
         .subscribe(() => {
           setTimeout(() => {
+            this.interceptHeaderCheckbox();
+            this.updateHeaderCheckboxState();
+            this.uncheckDisabledCheckboxes();
+          }, 100);
+        });
+    }
+
+    if (this.table.onSort) {
+      this.table.onSort
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(() => {
+          setTimeout(() => {
+            this.interceptHeaderCheckbox();
             this.updateHeaderCheckboxState();
             this.uncheckDisabledCheckboxes();
           }, 100);
@@ -60,117 +74,137 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     this.destroy$.next();
     this.destroy$.complete();
     
-    // Restore original toggleAll if it was overridden
-    if (this.originalToggleAll) {
-      this.table.toggleAll = this.originalToggleAll;
-    }
-    
-    if (this.headerCheckboxClickListener) {
-      const headerCheckbox = this.getHeaderCheckbox();
-      if (headerCheckbox) {
-        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener);
-      }
+    // Clean up listeners
+    this.removeHeaderCheckboxListeners();
+  }
+
+  private overrideHeaderCheckboxBehavior() {
+    // Try to override the onHeaderCheckboxToggle handler
+    const originalEmit = this.table.onHeaderCheckboxToggle?.emit;
+    if (originalEmit) {
+      this.table.onHeaderCheckboxToggle.emit = (event: any) => {
+        // Intercept the emit
+        this.handleSelectAll(event);
+        // Don't call the original emit as we're handling it ourselves
+      };
     }
   }
 
-  private overrideToggleAll() {
-    // Store the original toggleAll method
-    this.originalToggleAll = this.table.toggleAll;
-    
-    // Override with our custom implementation
-    this.table.toggleAll = (event: any) => {
-      if (!this.table.value || this.table.value.length === 0) {
-        return;
-      }
+  private interceptHeaderCheckbox() {
+    // Remove any existing listeners first
+    this.removeHeaderCheckboxListeners();
 
-      const checkbox = event?.target || event?.currentTarget;
-      const isChecking = checkbox?.checked !== false;
-
-      if (isChecking) {
-        // Select only enabled items
-        const enabledItems = this.getEnabledItems();
-        this.table.selection = [...enabledItems];
-        
-        // Ensure the header checkbox stays checked
-        setTimeout(() => {
-          const headerCheckbox = this.getHeaderCheckbox();
-          if (headerCheckbox && enabledItems.length > 0) {
-            headerCheckbox.checked = true;
-            headerCheckbox.indeterminate = false;
-          }
-          // Ensure disabled checkboxes remain unchecked
-          this.uncheckDisabledCheckboxes();
-        }, 0);
-      } else {
-        // Deselect all
-        this.table.selection = [];
-      }
-
-      // Emit the selection change
-      this.table.selectionChange.emit(this.table.selection);
-      this.table.onHeaderCheckboxToggle.emit({
-        originalEvent: event,
-        checked: isChecking
-      });
-
-      // Update UI
-      setTimeout(() => {
-        this.updateBodyCheckboxes();
-        this.updateHeaderCheckboxState();
-      }, 0);
-    };
-  }
-
-  private setupHeaderCheckboxOverride() {
     const headerCheckbox = this.getHeaderCheckbox();
-    if (!headerCheckbox) return;
-
-    // Remove existing listeners and add our own
-    const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
-    headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
-
-    this.headerCheckboxClickListener = (event: Event) => {
-      event.stopPropagation();
+    if (!headerCheckbox) {
+      // Try again with a slight delay as the checkbox might not be rendered yet
       setTimeout(() => {
-        this.handleHeaderCheckboxClick(newCheckbox, event);
+        const checkbox = this.getHeaderCheckbox();
+        if (checkbox) {
+          this.attachHeaderCheckboxListeners(checkbox);
+        }
+      }, 50);
+      return;
+    }
+
+    this.attachHeaderCheckboxListeners(headerCheckbox);
+  }
+
+  private attachHeaderCheckboxListeners(headerCheckbox: HTMLInputElement) {
+    // Prevent default behavior and handle our own
+    this.headerCheckboxClickListener = () => {
+      // Use setTimeout to ensure we process after PrimeNG's handlers
+      setTimeout(() => {
+        this.handleHeaderCheckboxAction(headerCheckbox);
       }, 0);
     };
 
-    newCheckbox.addEventListener('click', this.headerCheckboxClickListener);
+    this.headerCheckboxChangeListener = () => {
+      // Prevent the change from propagating
+      setTimeout(() => {
+        this.handleHeaderCheckboxAction(headerCheckbox);
+      }, 0);
+    };
+
+    // Use capture phase to intercept before PrimeNG
+    headerCheckbox.addEventListener('click', this.headerCheckboxClickListener, true);
+    headerCheckbox.addEventListener('change', this.headerCheckboxChangeListener, true);
   }
 
-  private handleHeaderCheckboxClick(checkbox: HTMLInputElement, event: Event) {
-    if (checkbox.checked) {
-      // Select only enabled items
-      this.selectEnabledItemsOnly();
-    } else {
-      // Deselect all
-      this.table.selection = [];
-      this.table.selectionChange.emit([]);
-      this.updateBodyCheckboxes();
+  private removeHeaderCheckboxListeners() {
+    const headerCheckbox = this.getHeaderCheckbox();
+    if (headerCheckbox) {
+      if (this.headerCheckboxClickListener) {
+        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener, true);
+      }
+      if (this.headerCheckboxChangeListener) {
+        headerCheckbox.removeEventListener('change', this.headerCheckboxChangeListener, true);
+      }
     }
-    
-    // Always ensure disabled checkboxes are unchecked
-    setTimeout(() => {
-      this.uncheckDisabledCheckboxes();
-    }, 0);
   }
 
-  private selectEnabledItemsOnly() {
-    const enabledItems = this.getEnabledItems();
-    
-    this.table.selection = [...enabledItems];
-    this.table.selectionChange.emit(this.table.selection);
+  private handleHeaderCheckboxAction(checkbox: HTMLInputElement) {
+    // Determine if we're selecting or deselecting
+    const isSelecting = checkbox.checked;
 
-    // Update body checkboxes
-    this.updateBodyCheckboxes();
-    
-    // Update header checkbox state
+    if (isSelecting) {
+      this.selectAllEnabled();
+    } else {
+      this.deselectAll();
+    }
+
+    // Ensure the checkbox state is correct
     setTimeout(() => {
       this.updateHeaderCheckboxState();
-      // Double-check disabled checkboxes are unchecked
       this.uncheckDisabledCheckboxes();
     }, 0);
+  }
+
+  private handleSelectAll(event: any) {
+    const checked = event?.checked ?? event?.originalEvent?.target?.checked;
+    
+    if (checked) {
+      this.selectAllEnabled();
+    } else {
+      this.deselectAll();
+    }
+
+    setTimeout(() => {
+      this.updateHeaderCheckboxState();
+      this.uncheckDisabledCheckboxes();
+    }, 0);
+  }
+
+  private selectAllEnabled() {
+    const enabledItems = this.getEnabledItems();
+    
+    // Update selection with only enabled items
+    this.table.selection = [...enabledItems];
+    
+    // Emit the change
+    if (this.table.selectionChange) {
+      this.table.selectionChange.emit(this.table.selection);
+    }
+
+    // Update the visual state of checkboxes
+    this.updateBodyCheckboxes();
+    
+    // Ensure disabled checkboxes stay unchecked
+    setTimeout(() => {
+      this.uncheckDisabledCheckboxes();
+    }, 0);
+  }
+
+  private deselectAll() {
+    // Clear selection
+    this.table.selection = [];
+    
+    // Emit the change
+    if (this.table.selectionChange) {
+      this.table.selectionChange.emit(this.table.selection);
+    }
+
+    // Update the visual state of checkboxes
+    this.updateBodyCheckboxes();
   }
 
   private getEnabledItems(): any[] {
@@ -181,12 +215,29 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
     this.table.value.forEach((item, index) => {
       const checkbox = bodyCheckboxes[index];
+      // Check if checkbox exists and is not disabled
       if (checkbox && !checkbox.disabled) {
         enabledItems.push(item);
+      } else if (!checkbox) {
+        // If no checkbox found (might be on different page), check if row is selectable
+        // You might need to adjust this based on your isRowSelectable logic
+        if (this.isRowSelectable(item, index)) {
+          enabledItems.push(item);
+        }
       }
     });
 
     return enabledItems;
+  }
+
+  private isRowSelectable(item: any, index: number): boolean {
+    // If table has a custom selectable function, use it
+    if (typeof this.table.isRowSelectable === 'function') {
+      return this.table.isRowSelectable({ data: item, index: index });
+    }
+    
+    // Default to true if no custom logic
+    return true;
   }
 
   private updateBodyCheckboxes() {
@@ -211,6 +262,18 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     bodyCheckboxes.forEach(checkbox => {
       if (checkbox.disabled) {
         checkbox.checked = false;
+        // Also update the visual state of the parent p-checkbox if it exists
+        const pCheckbox = checkbox.closest('.p-checkbox');
+        if (pCheckbox) {
+          const box = pCheckbox.querySelector('.p-checkbox-box');
+          if (box) {
+            box.classList.remove('p-highlight');
+            const icon = box.querySelector('.p-checkbox-icon');
+            if (icon) {
+              icon.classList.remove('pi-check');
+            }
+          }
+        }
       }
     });
   }
@@ -227,7 +290,9 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
     if (validSelection.length !== this.table.selection.length) {
       this.table.selection = validSelection;
-      this.table.selectionChange.emit(validSelection);
+      if (this.table.selectionChange) {
+        this.table.selectionChange.emit(validSelection);
+      }
     }
 
     // Ensure disabled checkboxes are unchecked
@@ -242,6 +307,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     let enabledCount = 0;
     let selectedEnabledCount = 0;
 
+    // Count enabled and selected items
     bodyCheckboxes.forEach((checkbox, index) => {
       if (!checkbox.disabled) {
         enabledCount++;
@@ -252,6 +318,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     });
 
+    // Update header checkbox state
     if (enabledCount === 0) {
       // No enabled checkboxes
       headerCheckbox.checked = false;
@@ -269,23 +336,58 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = false;
     }
+
+    // Also update the visual state of p-checkbox component if it exists
+    const pCheckbox = headerCheckbox.closest('.p-checkbox');
+    if (pCheckbox) {
+      const box = pCheckbox.querySelector('.p-checkbox-box');
+      if (box) {
+        if (headerCheckbox.checked) {
+          box.classList.add('p-highlight');
+          const icon = box.querySelector('.p-checkbox-icon');
+          if (icon) {
+            icon.classList.add('pi-check');
+            icon.classList.remove('pi-minus');
+          }
+        } else if (headerCheckbox.indeterminate) {
+          box.classList.add('p-highlight');
+          const icon = box.querySelector('.p-checkbox-icon');
+          if (icon) {
+            icon.classList.remove('pi-check');
+            icon.classList.add('pi-minus');
+          }
+        } else {
+          box.classList.remove('p-highlight');
+          const icon = box.querySelector('.p-checkbox-icon');
+          if (icon) {
+            icon.classList.remove('pi-check', 'pi-minus');
+          }
+        }
+      }
+    }
   }
 
   private isItemSelected(item: any): boolean {
-    if (!this.table.selection || !Array.isArray(this.table.selection)) {
+    if (!this.table.selection) {
       return false;
     }
     
-    return this.table.selection.some(selectedItem => 
-      this.itemsEqual(item, selectedItem)
-    );
+    // Handle both array and single selection modes
+    if (Array.isArray(this.table.selection)) {
+      return this.table.selection.some(selectedItem => 
+        this.itemsEqual(item, selectedItem)
+      );
+    } else {
+      return this.itemsEqual(item, this.table.selection);
+    }
   }
 
   private getHeaderCheckbox(): HTMLInputElement | null {
     const selectors = [
-      'thead p-tableheadercheckbox input[type="checkbox"]',
+      'thead p-tableheadercheckbox .p-checkbox-box input[type="checkbox"]',
+      'thead .p-selection-column .p-checkbox-box input[type="checkbox"]',
       'thead .p-checkbox input[type="checkbox"]',
-      'thead .p-checkbox-box + input[type="checkbox"]',
+      'thead input[type="checkbox"][role="checkbox"]',
       'thead input[type="checkbox"]'
     ];
 
@@ -299,9 +401,10 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
   private getBodyCheckboxes(): HTMLInputElement[] {
     const selectors = [
-      'tbody p-tablecheckbox input[type="checkbox"]',
+      'tbody p-tablecheckbox .p-checkbox-box input[type="checkbox"]',
+      'tbody .p-selection-column .p-checkbox-box input[type="checkbox"]',
       'tbody .p-checkbox input[type="checkbox"]',
-      'tbody .p-checkbox-box + input[type="checkbox"]',
+      'tbody input[type="checkbox"][role="checkbox"]',
       'tbody input[type="checkbox"]'
     ];
 
@@ -321,20 +424,20 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Handle null/undefined
     if (!item1 || !item2) return false;
     
-    // Try to compare by common ID properties
-    const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
-    for (const prop of idProps) {
-      if (item1[prop] !== undefined && item2[prop] !== undefined) {
-        return item1[prop] === item2[prop];
-      }
-    }
-    
     // If using dataKey on the table, use that
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(item1, this.table.dataKey);
       const key2 = this.resolveFieldData(item2, this.table.dataKey);
       if (key1 !== undefined && key2 !== undefined) {
         return key1 === key2;
+      }
+    }
+    
+    // Try to compare by common ID properties
+    const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
+    for (const prop of idProps) {
+      if (item1[prop] !== undefined && item2[prop] !== undefined) {
+        return item1[prop] === item2[prop];
       }
     }
     
