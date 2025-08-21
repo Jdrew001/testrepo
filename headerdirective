@@ -336,21 +336,25 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
     // Update header checkbox state
     if (enabledCount === 0) {
-      // No enabled checkboxes
+      // No enabled checkboxes - keep header enabled but unchecked
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = false;
+      headerCheckbox.disabled = false; // Keep it enabled
     } else if (selectedEnabledCount === enabledCount && selectedEnabledCount > 0) {
       // All enabled items are selected
       headerCheckbox.checked = true;
       headerCheckbox.indeterminate = false;
+      headerCheckbox.disabled = false; // Keep it enabled
     } else if (selectedEnabledCount > 0) {
       // Some enabled items are selected
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = true;
+      headerCheckbox.disabled = false; // Keep it enabled
     } else {
       // No items are selected
       headerCheckbox.checked = false;
       headerCheckbox.indeterminate = false;
+      headerCheckbox.disabled = false; // Keep it enabled
     }
 
     // Also update the visual state of p-checkbox component if it exists
@@ -358,6 +362,9 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (pCheckbox) {
       const box = pCheckbox.querySelector('.p-checkbox-box');
       if (box) {
+        // Ensure the checkbox box is not disabled
+        box.classList.remove('p-disabled');
+        
         if (headerCheckbox.checked) {
           box.classList.add('p-highlight');
           const icon = box.querySelector('.p-checkbox-icon');
@@ -376,7 +383,9 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           box.classList.remove('p-highlight');
           const icon = box.querySelector('.p-checkbox-icon');
           if (icon) {
-            icon.classList.remove('pi', 'pi-check', 'pi-minus');
+            // Keep the pi class but remove specific icon classes
+            icon.classList.add('pi');
+            icon.classList.remove('pi-check', 'pi-minus');
           }
         }
       }
