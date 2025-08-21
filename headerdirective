@@ -1,244 +1,175 @@
-/**
-
-- Simple PrimeNG Selection Fix
-- 
-- Fixes the “select all” issue where disabled checkboxes get selected.
-- Just add to your table - no configuration needed!
-- 
-- Usage:
-- <p-table [value]=“items” [(selection)]=“selected” appSelectionFix>
-- <!-- your existing table template -->
-- </p-table>
-
-*/
-
-import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from ‘@angular/core’;
-import { Table } from ‘primeng/table’;
-import { Subject, takeUntil } from ‘rxjs’;
+import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef } from '@angular/core';
+import { Table } from 'primeng/table';
+import { Subject, takeUntil } from 'rxjs';
 
 @Directive({
-selector: ‘[appSelectionFix]’
+  selector: '[appSelectionFix]'
 })
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
+  
+  private destroy$ = new Subject<void>();
+  private headerCheckboxClickListener?: () => void;
 
-private destroy$ = new Subject<void>();
-private headerCheckboxClickListener?: () => void;
+  constructor(
+    @Host() private table: Table,
+    private element: ElementRef
+  ) {}
 
-constructor(
-@Host() private table: Table,
-private element: ElementRef
-) {}
-
-ngOnInit() {
-// Monitor selection changes to clean up disabled items
-if (this.table.selectionChange) {
-this.table.selectionChange
-.pipe(takeUntil(this.destroy$))
-.subscribe(() => {
-setTimeout(() => this.cleanupDisabledItems(), 0);
-});
-}
-}
-
-ngAfterViewInit() {
-// Override header checkbox behavior
-setTimeout(() => {
-this.setupHeaderCheckboxOverride();
-}, 100);
-}
-
-ngOnDestroy() {
-this.destroy$.next();
-this.destroy$.complete();
-
-```
-if (this.headerCheckboxClickListener) {
-  const headerCheckbox = this.getHeaderCheckbox();
-  if (headerCheckbox) {
-    headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener);
-  }
-}
-```
-
-}
-
-private setupHeaderCheckboxOverride() {
-const headerCheckbox = this.getHeaderCheckbox();
-if (!headerCheckbox) return;
-
-```
-// Remove existing listeners and add our own
-const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
-headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
-
-this.headerCheckboxClickListener = () => {
-  setTimeout(() => {
-    this.handleHeaderCheckboxClick(newCheckbox);
-  }, 0);
-};
-
-newCheckbox.addEventListener('click', this.headerCheckboxClickListener);
-```
-
-}
-
-private handleHeaderCheckboxClick(checkbox: HTMLInputElement) {
-if (checkbox.checked) {
-// Select only enabled items
-this.selectEnabledItemsOnly();
-} else {
-// Deselect all
-this.table.selection = [];
-this.table.selectionChange.emit([]);
-}
-}
-
-private selectEnabledItemsOnly() {
-if (!this.table.value) return;
-
-```
-const enabledItems: any[] = [];
-const bodyCheckboxes = this.getBodyCheckboxes();
-
-bodyCheckboxes.forEach((checkbox, index) => {
-  if (!checkbox.disabled && this.table.value[index]) {
-    enabledItems.push(this.table.value[index]);
-  }
-});
-
-this.table.selection = enabledItems;
-this.table.selectionChange.emit(enabledItems);
-
-// Manually check the body checkboxes for enabled items
-bodyCheckboxes.forEach((checkbox, index) => {
-  if (!checkbox.disabled && this.table.value[index]) {
-    checkbox.checked = true;
-  }
-});
-```
-
-}
-
-private cleanupDisabledItems() {
-if (!this.table.selection?.length) return;
-
-```
-const bodyCheckboxes = this.getBodyCheckboxes();
-const enabledItems: any[] = [];
-
-// Collect only items that have enabled checkboxes
-bodyCheckboxes.forEach((checkbox, index) => {
-  if (!checkbox.disabled && this.table.value?.[index]) {
-    enabledItems.push(this.table.value[index]);
-  }
-});
-
-// Filter selection to only include enabled items
-const validSelection = this.table.selection.filter(item => 
-  enabledItems.some(enabledItem => this.itemsEqual(item, enabledItem))
-);
-
-if (validSelection.length !== this.table.selection.length) {
-  this.table.selection = validSelection;
-  this.table.selectionChange.emit(validSelection);
-
-  // Uncheck any disabled checkboxes that might be checked
-  bodyCheckboxes.forEach((checkbox, index) => {
-    if (checkbox.disabled) {
-      checkbox.checked = false;
+  ngOnInit() {
+    // Monitor selection changes to clean up disabled items
+    if (this.table.selectionChange) {
+      this.table.selectionChange
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(() => {
+          setTimeout(() => this.cleanupDisabledItems(), 0);
+        });
     }
-  });
-}
-```
+  }
 
-}
+  ngAfterViewInit() {
+    // Override header checkbox behavior
+    setTimeout(() => {
+      this.setupHeaderCheckboxOverride();
+    }, 100);
+  }
 
-private getHeaderCheckbox(): HTMLInputElement | null {
-const selectors = [
-‘thead p-tableheadercheckbox input’,
-‘thead .p-checkbox input’,
-‘thead input[type=“checkbox”]’
-];
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+    
+    if (this.headerCheckboxClickListener) {
+      const headerCheckbox = this.getHeaderCheckbox();
+      if (headerCheckbox) {
+        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener);
+      }
+    }
+  }
 
-```
-for (const selector of selectors) {
-  const element = this.element.nativeElement.querySelector(selector);
-  if (element) return element as HTMLInputElement;
-}
+  private setupHeaderCheckboxOverride() {
+    const headerCheckbox = this.getHeaderCheckbox();
+    if (!headerCheckbox) return;
 
-return null;
-```
+    // Remove existing listeners and add our own
+    const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
+    headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
 
-}
+    this.headerCheckboxClickListener = () => {
+      setTimeout(() => {
+        this.handleHeaderCheckboxClick(newCheckbox);
+      }, 0);
+    };
 
-private getBodyCheckboxes(): HTMLInputElement[] {
-const selectors = [
-‘tbody p-tablecheckbox input’,
-‘tbody .p-checkbox input’,
-‘tbody input[type=“checkbox”]’
-];
+    newCheckbox.addEventListener('click', this.headerCheckboxClickListener);
+  }
 
-```
-for (const selector of selectors) {
-  const elements = this.element.nativeElement.querySelectorAll(selector);
-  if (elements.length > 0) {
-    return Array.from(elements) as HTMLInputElement[];
+  private handleHeaderCheckboxClick(checkbox: HTMLInputElement) {
+    if (checkbox.checked) {
+      // Select only enabled items
+      this.selectEnabledItemsOnly();
+    } else {
+      // Deselect all
+      this.table.selection = [];
+      this.table.selectionChange.emit([]);
+    }
+  }
+
+  private selectEnabledItemsOnly() {
+    if (!this.table.value) return;
+
+    const enabledItems: any[] = [];
+    const bodyCheckboxes = this.getBodyCheckboxes();
+
+    bodyCheckboxes.forEach((checkbox, index) => {
+      if (!checkbox.disabled && this.table.value[index]) {
+        enabledItems.push(this.table.value[index]);
+      }
+    });
+
+    this.table.selection = enabledItems;
+    this.table.selectionChange.emit(enabledItems);
+
+    // Manually check the body checkboxes for enabled items
+    bodyCheckboxes.forEach((checkbox, index) => {
+      if (!checkbox.disabled && this.table.value[index]) {
+        checkbox.checked = true;
+      }
+    });
+  }
+
+  private cleanupDisabledItems() {
+    if (!this.table.selection?.length) return;
+
+    const bodyCheckboxes = this.getBodyCheckboxes();
+    const enabledItems: any[] = [];
+
+    // Collect only items that have enabled checkboxes
+    bodyCheckboxes.forEach((checkbox, index) => {
+      if (!checkbox.disabled && this.table.value?.[index]) {
+        enabledItems.push(this.table.value[index]);
+      }
+    });
+
+    // Filter selection to only include enabled items
+    const validSelection = this.table.selection.filter(item => 
+      enabledItems.some(enabledItem => this.itemsEqual(item, enabledItem))
+    );
+
+    if (validSelection.length !== this.table.selection.length) {
+      this.table.selection = validSelection;
+      this.table.selectionChange.emit(validSelection);
+
+      // Uncheck any disabled checkboxes that might be checked
+      bodyCheckboxes.forEach((checkbox, index) => {
+        if (checkbox.disabled) {
+          checkbox.checked = false;
+        }
+      });
+    }
+  }
+
+  private getHeaderCheckbox(): HTMLInputElement | null {
+    const selectors = [
+      'thead p-tableheadercheckbox input',
+      'thead .p-checkbox input',
+      'thead input[type="checkbox"]'
+    ];
+
+    for (const selector of selectors) {
+      const element = this.element.nativeElement.querySelector(selector);
+      if (element) return element as HTMLInputElement;
+    }
+
+    return null;
+  }
+
+  private getBodyCheckboxes(): HTMLInputElement[] {
+    const selectors = [
+      'tbody p-tablecheckbox input',
+      'tbody .p-checkbox input', 
+      'tbody input[type="checkbox"]'
+    ];
+
+    for (const selector of selectors) {
+      const elements = this.element.nativeElement.querySelectorAll(selector);
+      if (elements.length > 0) {
+        return Array.from(elements) as HTMLInputElement[];
+      }
+    }
+
+    return [];
+  }
+
+  private itemsEqual(item1: any, item2: any): boolean {
+    if (item1 === item2) return true;
+    
+    // Try to compare by common ID properties
+    const idProps = ['id', 'ID', '_id', 'key', 'uuid'];
+    for (const prop of idProps) {
+      if (item1?.[prop] && item2?.[prop]) {
+        return item1[prop] === item2[prop];
+      }
+    }
+    
+    return false;
   }
 }
-
-return [];
-```
-
-}
-
-private itemsEqual(item1: any, item2: any): boolean {
-if (item1 === item2) return true;
-
-```
-// Try to compare by common ID properties
-const idProps = ['id', 'ID', '_id', 'key', 'uuid'];
-for (const prop of idProps) {
-  if (item1?.[prop] && item2?.[prop]) {
-    return item1[prop] === item2[prop];
-  }
-}
-
-return false;
-```
-
-}
-}
-
-/*
-USAGE EXAMPLES:
-
-1. Basic usage (just add the directive):
-   <p-table [value]=“users” [(selection)]=“selectedUsers” appSelectionFix>
-
-  <ng-template pTemplate="header">
-    <tr>
-      <th><p-tableHeaderCheckbox></p-tableHeaderCheckbox></th>
-      <th>Name</th>
-    </tr>
-  </ng-template>
-  <ng-template pTemplate="body" let-user>
-    <tr>
-      <td>
-        <p-tableCheckbox [value]="user" [disabled]="user.inactive"></p-tableCheckbox>
-      </td>
-      <td>{{user.name}}</td>
-    </tr>
-  </ng-template>
-</p-table>
-
-1. Works with any disabled logic:
-   <p-tableCheckbox [value]=“item” [disabled]=“item.status === ‘locked’”></p-tableCheckbox>
-1. Module registration:
-   @NgModule({
-   declarations: [SelectionFixDirective],
-   // …
-   })
-   export class YourModule { }
-
-That’s it! No configuration needed.
-*/
