@@ -1,4 +1,11 @@
-import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2, NgZone } from '@angular/core';
+  private startHeaderMonitoring() {
+    // Clear any existing interval
+    if (this.headerCheckboxInterval) {
+      clearInterval(this.headerCheckboxInterval);
+    }
+
+    // Aggressively monitor header checkbox state to keep it ALWAYS enabled
+    this.ngZone.runOutsideAngular(() => {import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2, NgZone } from '@angular/core';
 import { Table } from 'primeng/table';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -122,20 +129,38 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       clearInterval(this.headerCheckboxInterval);
     }
 
-    // Monitor header checkbox state
+    // Aggressively monitor header checkbox state to keep it ALWAYS enabled
     this.ngZone.runOutsideAngular(() => {
       this.headerCheckboxInterval = setInterval(() => {
         const headerEl = this.getHeaderCheckboxElement();
         if (headerEl) {
           const checkbox = headerEl.querySelector('input[type="checkbox"]');
-          if (checkbox && (checkbox as HTMLInputElement).disabled) {
-            this.ngZone.run(() => {
-              this.renderer.setProperty(checkbox, 'disabled', false);
-              this.updateHeaderVisualState();
-            });
+          if (checkbox) {
+            const inputCheckbox = checkbox as HTMLInputElement;
+            
+            // Get total data count
+            const allData = this.table.filteredValue || this.table.value || [];
+            
+            // ALWAYS keep header enabled if there's any data
+            if (allData.length > 0) {
+              if (inputCheckbox.disabled) {
+                this.ngZone.run(() => {
+                  this.renderer.setProperty(checkbox, 'disabled', false);
+                  this.updateHeaderVisualState();
+                });
+              }
+            } else {
+              // Only disable if there's truly no data
+              if (!inputCheckbox.disabled) {
+                this.ngZone.run(() => {
+                  this.renderer.setProperty(checkbox, 'disabled', true);
+                  this.updateHeaderVisualState();
+                });
+              }
+            }
           }
         }
-      }, 100);
+      }, 50); // More aggressive checking every 50ms
     });
   }
 
@@ -192,6 +217,11 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private getItemKey(item: any): string {
+    // Handle composite key of entityId + entityType
+    if (item.entityId !== undefined && item.entityType !== undefined) {
+      return `${item.entityType}_${item.entityId}`;
+    }
+    
     if (this.table.dataKey) {
       const key = this.resolveFieldData(item, this.table.dataKey);
       return String(key);
@@ -344,43 +374,54 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const checkbox = headerEl.querySelector('input[type="checkbox"]') as HTMLInputElement;
     if (!checkbox) return;
 
-    // Force enable
-    this.renderer.setProperty(checkbox, 'disabled', false);
-
-    // For header state, we need to consider ALL pages, not just current
+    // Get ALL data (across all pages)
     const allData = this.table.filteredValue || this.table.value || [];
     
-    if (allData.length === 0) {
-      // No data at all
+    // CRITICAL: Always enable header if there's data
+    if (allData.length > 0) {
+      this.renderer.setProperty(checkbox, 'disabled', false);
+    } else {
+      // Only disable when there's absolutely no data
+      this.renderer.setProperty(checkbox, 'disabled', true);
       this.renderer.setProperty(checkbox, 'checked', false);
       this.renderer.setProperty(checkbox, 'indeterminate', false);
       this.updateHeaderVisualState();
       return;
     }
 
-    // Get info about current page disabled items
+    // Calculate total selection state across ALL pages
+    // We need to estimate total enabled items across all pages
     const currentPageData = this.getCurrentPageData();
     const currentPageCheckboxes = this.getBodyCheckboxes();
-    const currentPageDisabledCount = currentPageCheckboxes.filter(cb => cb.disabled).length;
     
-    // For items not on current page, assume they're enabled
-    // This is a limitation - we can't know the disabled state of items on other pages
+    // Count disabled on current page
+    let currentPageDisabledCount = 0;
+    currentPageData.forEach((item, index) => {
+      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
+        currentPageDisabledCount++;
+      }
+    });
+    
+    // For other pages, we can't know disabled state, so assume all are enabled
+    // This is a limitation unless we track disabled state globally
     const currentPageEnabledCount = currentPageData.length - currentPageDisabledCount;
     const otherPagesCount = allData.length - currentPageData.length;
     const estimatedTotalEnabled = currentPageEnabledCount + otherPagesCount;
 
-    // Count selected items
-    let selectedCount = 0;
+    // Count total selected items across all pages
+    let totalSelectedCount = 0;
     if (this.table.selection && Array.isArray(this.table.selection)) {
-      selectedCount = this.table.selection.length;
+      totalSelectedCount = this.table.selection.length;
     }
 
-    // Update checkbox state based on selection across ALL data
-    if (selectedCount === 0) {
+    // Determine header checkbox state
+    if (totalSelectedCount === 0) {
+      // Nothing selected
       this.renderer.setProperty(checkbox, 'checked', false);
       this.renderer.setProperty(checkbox, 'indeterminate', false);
-    } else if (selectedCount >= estimatedTotalEnabled) {
-      // All enabled items (that we know of) are selected
+    } else if (totalSelectedCount >= allData.length - currentPageDisabledCount) {
+      // All possible items are selected (total minus disabled)
+      // This accounts for disabled items only on current page
       this.renderer.setProperty(checkbox, 'checked', true);
       this.renderer.setProperty(checkbox, 'indeterminate', false);
     } else {
@@ -401,35 +442,51 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
     const wrapper = headerEl.querySelector('.p-checkbox');
     if (wrapper) {
-      this.renderer.removeClass(wrapper, 'p-checkbox-disabled');
-      this.renderer.removeClass(wrapper, 'p-disabled');
+      // Get data count to determine if we should show as disabled
+      const allData = this.table.filteredValue || this.table.value || [];
       
-      const box = wrapper.querySelector('.p-checkbox-box');
-      if (box) {
-        this.renderer.removeClass(box, 'p-disabled');
+      if (allData.length > 0) {
+        // ALWAYS remove disabled classes when there's data
+        this.renderer.removeClass(wrapper, 'p-checkbox-disabled');
+        this.renderer.removeClass(wrapper, 'p-disabled');
         
-        // Update highlight based on state
-        if (checkbox.checked || checkbox.indeterminate) {
-          this.renderer.addClass(box, 'p-highlight');
-        } else {
-          this.renderer.removeClass(box, 'p-highlight');
-        }
-        
-        // Update icon
-        const icon = box.querySelector('.p-checkbox-icon');
-        if (icon) {
-          // Clear existing classes
-          this.renderer.setAttribute(icon, 'class', 'p-checkbox-icon');
+        const box = wrapper.querySelector('.p-checkbox-box');
+        if (box) {
+          this.renderer.removeClass(box, 'p-disabled');
           
-          if (checkbox.checked) {
-            this.renderer.addClass(icon, 'pi');
-            this.renderer.addClass(icon, 'pi-check');
-          } else if (checkbox.indeterminate) {
-            this.renderer.addClass(icon, 'pi');
-            this.renderer.addClass(icon, 'pi-minus');
+          // Update highlight based on state
+          if (checkbox.checked || checkbox.indeterminate) {
+            this.renderer.addClass(box, 'p-highlight');
           } else {
-            this.renderer.addClass(icon, 'pi');
+            this.renderer.removeClass(box, 'p-highlight');
           }
+          
+          // Update icon
+          const icon = box.querySelector('.p-checkbox-icon');
+          if (icon) {
+            // Clear existing classes
+            this.renderer.setAttribute(icon, 'class', 'p-checkbox-icon');
+            
+            if (checkbox.checked) {
+              this.renderer.addClass(icon, 'pi');
+              this.renderer.addClass(icon, 'pi-check');
+            } else if (checkbox.indeterminate) {
+              this.renderer.addClass(icon, 'pi');
+              this.renderer.addClass(icon, 'pi-minus');
+            } else {
+              this.renderer.addClass(icon, 'pi');
+            }
+          }
+        }
+      } else {
+        // Only show as disabled when there's no data
+        this.renderer.addClass(wrapper, 'p-checkbox-disabled');
+        this.renderer.addClass(wrapper, 'p-disabled');
+        
+        const box = wrapper.querySelector('.p-checkbox-box');
+        if (box) {
+          this.renderer.addClass(box, 'p-disabled');
+          this.renderer.removeClass(box, 'p-highlight');
         }
       }
     }
@@ -462,6 +519,12 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   private itemsEqual(item1: any, item2: any): boolean {
     if (item1 === item2) return true;
     if (!item1 || !item2) return false;
+    
+    // Handle composite key of entityId + entityType
+    if (item1.entityId !== undefined && item1.entityType !== undefined &&
+        item2.entityId !== undefined && item2.entityType !== undefined) {
+      return item1.entityId === item2.entityId && item1.entityType === item2.entityType;
+    }
     
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(item1, this.table.dataKey);
