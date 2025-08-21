@@ -9,8 +9,8 @@ import { takeUntil } from 'rxjs/operators';
 export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   
   private destroy$ = new Subject<void>();
-  private headerCheckboxClickListener?: () => void;
-  private headerCheckboxChangeListener?: () => void;
+  private headerCheckboxClickListener?: (event: Event) => void;
+  private headerCheckboxChangeListener?: (event: Event) => void;
 
   constructor(
     @Host() private table: Table,
@@ -165,10 +165,10 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const headerCheckbox = this.getHeaderCheckbox();
     if (headerCheckbox) {
       if (this.headerCheckboxClickListener) {
-        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener, true);
+        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener as EventListener, true);
       }
       if (this.headerCheckboxChangeListener) {
-        headerCheckbox.removeEventListener('change', this.headerCheckboxChangeListener, true);
+        headerCheckbox.removeEventListener('change', this.headerCheckboxChangeListener as EventListener, true);
       }
     }
   }
