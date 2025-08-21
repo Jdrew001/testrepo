@@ -1,6 +1,6 @@
 import { Directive, Host, OnInit, OnDestroy, AfterViewInit, ElementRef, Renderer2, NgZone } from '@angular/core';
 import { Table } from 'primeng/table';
-import { Subject, interval } from 'rxjs';
+import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 @Directive({
@@ -12,6 +12,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   private headerCheckboxClickListener?: (event: Event) => void;
   private headerCheckboxMonitorInterval?: any;
   private lastKnownHeaderState = { checked: false, indeterminate: false };
+  private isProcessingHeaderClick = false;
 
   constructor(
     @Host() private table: Table,
@@ -26,10 +27,13 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       this.table.selectionChange
         .pipe(takeUntil(this.destroy$))
         .subscribe(() => {
-          setTimeout(() => {
-            this.cleanupDisabledItems();
-            this.updateHeaderCheckboxState();
-          }, 0);
+          // Don't update if we're processing a header click
+          if (!this.isProcessingHeaderClick) {
+            setTimeout(() => {
+              this.cleanupDisabledItems();
+              this.updateHeaderCheckboxState();
+            }, 0);
+          }
         });
     }
 
@@ -60,6 +64,17 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         });
       }
     });
+
+    // Also monitor for lazy loading if applicable
+    if (this.table.onLazyLoad) {
+      this.table.onLazyLoad.pipe(takeUntil(this.destroy$)).subscribe(() => {
+        setTimeout(() => {
+          this.setupHeaderCheckboxControl();
+          this.updateHeaderCheckboxState();
+          this.uncheckDisabledCheckboxes();
+        }, 100);
+      });
+    }
   }
 
   ngOnDestroy() {
@@ -84,6 +99,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         (this.table as any).toggleAll = (event: any) => {
           // Don't call the original, handle it ourselves
           this.handleCustomToggleAll();
+          return false;
         };
       }
 
@@ -99,6 +115,17 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
           }
           // Handle our custom logic instead
           this.handleCustomToggleAll();
+          return false;
+        };
+      }
+
+      // Override isAllRowsSelected if it exists
+      const originalIsAllRowsSelected = (this.table as any).isAllRowsSelected;
+      if (originalIsAllRowsSelected) {
+        (this.table as any).isAllRowsSelected = () => {
+          const enabledItems = this.getEnabledItems();
+          if (enabledItems.length === 0) return false;
+          return enabledItems.every(item => this.isItemSelected(item));
         };
       }
 
@@ -116,7 +143,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private startHeaderMonitoring() {
-    // Aggressively monitor and fix header checkbox state every 100ms
+    // Aggressively monitor and fix header checkbox state every 50ms
     this.ngZone.runOutsideAngular(() => {
       this.headerCheckboxMonitorInterval = setInterval(() => {
         const headerCheckbox = this.getHeaderCheckbox();
@@ -135,8 +162,16 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
               }
             });
           }
+          
+          // Also check if PrimeNG has messed with our checkbox element
+          const hasOurListener = (headerCheckbox as any).__ourListenerAttached;
+          if (!hasOurListener) {
+            this.ngZone.run(() => {
+              this.setupHeaderCheckboxControl();
+            });
+          }
         }
-      }, 100);
+      }, 50);
     });
   }
 
@@ -152,18 +187,38 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Force enable
     headerCheckbox.disabled = false;
     
-    // Remove all PrimeNG event listeners by cloning the element
-    const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
-    headerCheckbox.parentNode?.replaceChild(newCheckbox, headerCheckbox);
+    // Mark that we're attaching our listener
+    (headerCheckbox as any).__ourListenerAttached = true;
     
-    // Ensure visual state is correct
-    const pCheckbox = newCheckbox.closest('.p-checkbox');
-    if (pCheckbox) {
-      pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
-    }
+    // Remove all existing event listeners by cloning
+    const parent = headerCheckbox.parentNode;
+    if (parent) {
+      const newCheckbox = headerCheckbox.cloneNode(true) as HTMLInputElement;
+      newCheckbox.disabled = false;
+      (newCheckbox as any).__ourListenerAttached = true;
+      parent.replaceChild(newCheckbox, headerCheckbox);
+      
+      // Ensure visual state is correct
+      const pCheckbox = newCheckbox.closest('.p-checkbox');
+      if (pCheckbox) {
+        pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
+      }
 
-    // Attach our single click handler
-    this.attachHeaderCheckboxListener(newCheckbox);
+      // Attach our single click handler to the new checkbox
+      this.attachHeaderCheckboxListener(newCheckbox);
+      
+      // Also intercept clicks on the p-checkbox wrapper
+      if (pCheckbox) {
+        pCheckbox.addEventListener('click', (e) => {
+          if (e.target !== newCheckbox) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            newCheckbox.click();
+          }
+        }, true);
+      }
+    }
   }
 
   private attachHeaderCheckboxListener(headerCheckbox: HTMLInputElement) {
@@ -172,8 +227,16 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       event.stopPropagation();
       event.stopImmediatePropagation();
       
+      // Set flag to prevent circular updates
+      this.isProcessingHeaderClick = true;
+      
       // Handle the toggle
       this.handleCustomToggleAll();
+      
+      // Clear flag after processing
+      setTimeout(() => {
+        this.isProcessingHeaderClick = false;
+      }, 100);
       
       // Return false to prevent any other handlers
       return false;
@@ -182,21 +245,25 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Add listener with capture to intercept before anything else
     headerCheckbox.addEventListener('click', this.headerCheckboxClickListener, true);
     
-    // Also add to mousedown to be extra sure
-    headerCheckbox.addEventListener('mousedown', (e) => {
+    // Also prevent mousedown/mouseup to be extra sure
+    const preventEvent = (e: Event) => {
       e.stopPropagation();
       e.stopImmediatePropagation();
-    }, true);
+    };
+    
+    headerCheckbox.addEventListener('mousedown', preventEvent, true);
+    headerCheckbox.addEventListener('mouseup', preventEvent, true);
   }
 
   private handleCustomToggleAll() {
     const headerCheckbox = this.getHeaderCheckbox();
     if (!headerCheckbox) return;
 
-    // Determine next state based on current selection
+    // Get current state
     const enabledItems = this.getEnabledItems();
     const selectedEnabledItems = enabledItems.filter(item => this.isItemSelected(item));
     
+    // Determine action based on current selection state
     let shouldSelectAll = false;
     
     if (selectedEnabledItems.length === 0) {
@@ -212,8 +279,10 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
     // Apply the action
     if (shouldSelectAll) {
+      // Select only enabled items
       this.table.selection = [...enabledItems];
     } else {
+      // Deselect all
       this.table.selection = [];
     }
 
@@ -222,41 +291,25 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update visual states
+    // Update visual states immediately
     this.updateBodyCheckboxes();
     
-    // Update header state after action
+    // Update header state after a brief delay
     setTimeout(() => {
       this.updateHeaderCheckboxState();
-    }, 10);
+    }, 20);
   }
 
   private removeHeaderCheckboxListeners() {
     const headerCheckbox = this.getHeaderCheckbox();
-    if (headerCheckbox && this.headerCheckboxClickListener) {
-      headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener, true);
+    if (headerCheckbox) {
+      // Mark as not having our listener
+      (headerCheckbox as any).__ourListenerAttached = false;
+      
+      if (this.headerCheckboxClickListener) {
+        headerCheckbox.removeEventListener('click', this.headerCheckboxClickListener, true);
+      }
     }
-  }
-
-  private selectAllEnabled() {
-    const enabledItems = this.getEnabledItems();
-    this.table.selection = [...enabledItems];
-    
-    if (this.table.selectionChange) {
-      this.table.selectionChange.emit(this.table.selection);
-    }
-    
-    this.updateBodyCheckboxes();
-  }
-
-  private deselectAll() {
-    this.table.selection = [];
-    
-    if (this.table.selectionChange) {
-      this.table.selectionChange.emit(this.table.selection);
-    }
-    
-    this.updateBodyCheckboxes();
   }
 
   private getEnabledItems(): any[] {
@@ -265,6 +318,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const enabledItems: any[] = [];
     const bodyCheckboxes = this.getBodyCheckboxes();
 
+    // Use the actual checkbox disabled state as the source of truth
     if (bodyCheckboxes.length > 0) {
       this.table.value.forEach((item, index) => {
         const checkbox = bodyCheckboxes[index];
@@ -273,13 +327,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
         }
       });
     } else {
-      // Fallback - check if there's a rowSelectable function
-      return this.table.value.filter((item, index) => {
-        if (this.table.rowSelectable && typeof this.table.rowSelectable === 'function') {
-          return this.table.rowSelectable({ data: item, index });
-        }
-        return true;
-      });
+      // If no checkboxes rendered yet, return all items
+      return [...this.table.value];
     }
 
     return enabledItems;
@@ -293,26 +342,46 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       if (!item) return;
       
       if (checkbox.disabled) {
+        // Force disabled checkboxes to be unchecked
         checkbox.checked = false;
+        checkbox.indeterminate = false;
+        
         // Update visual state
         const pCheckbox = checkbox.closest('.p-checkbox');
         if (pCheckbox) {
           const box = pCheckbox.querySelector('.p-checkbox-box');
           if (box) {
             box.classList.remove('p-highlight');
+            const icon = box.querySelector('.p-checkbox-icon');
+            if (icon) {
+              icon.classList.remove('pi-check', 'pi-minus');
+            }
           }
         }
       } else {
-        checkbox.checked = this.isItemSelected(item);
+        // Update enabled checkbox based on selection
+        const isSelected = this.isItemSelected(item);
+        checkbox.checked = isSelected;
+        checkbox.indeterminate = false;
+        
         // Update visual state
         const pCheckbox = checkbox.closest('.p-checkbox');
         if (pCheckbox) {
           const box = pCheckbox.querySelector('.p-checkbox-box');
           if (box) {
-            if (checkbox.checked) {
+            if (isSelected) {
               box.classList.add('p-highlight');
+              const icon = box.querySelector('.p-checkbox-icon');
+              if (icon) {
+                icon.classList.add('pi', 'pi-check');
+                icon.classList.remove('pi-minus');
+              }
             } else {
               box.classList.remove('p-highlight');
+              const icon = box.querySelector('.p-checkbox-icon');
+              if (icon) {
+                icon.classList.remove('pi-check', 'pi-minus');
+              }
             }
           }
         }
@@ -325,6 +394,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     bodyCheckboxes.forEach(checkbox => {
       if (checkbox.disabled) {
         checkbox.checked = false;
+        checkbox.indeterminate = false;
         const pCheckbox = checkbox.closest('.p-checkbox');
         if (pCheckbox) {
           const box = pCheckbox.querySelector('.p-checkbox-box');
@@ -341,7 +411,9 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private cleanupDisabledItems() {
-    if (!this.table.selection?.length) return;
+    if (!this.table.selection || !Array.isArray(this.table.selection) || this.table.selection.length === 0) {
+      return;
+    }
 
     const enabledItems = this.getEnabledItems();
     const validSelection = this.table.selection.filter(item => 
@@ -362,33 +434,37 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const headerCheckbox = this.getHeaderCheckbox();
     if (!headerCheckbox) return;
 
-    // COUNT SELECTION STATE
+    // Get current selection state
     const enabledItems = this.getEnabledItems();
     const selectedEnabledCount = enabledItems.filter(item => this.isItemSelected(item)).length;
     const enabledCount = enabledItems.length;
 
-    // FORCE ENABLE - This is critical
+    // CRITICAL: Force the header checkbox to be enabled no matter what
     headerCheckbox.disabled = false;
     
-    // Determine visual state
+    // Determine the correct visual state
     let newChecked = false;
     let newIndeterminate = false;
     
     if (enabledCount === 0) {
+      // No enabled items
       newChecked = false;
       newIndeterminate = false;
     } else if (selectedEnabledCount === 0) {
+      // No selection
       newChecked = false;
       newIndeterminate = false;
     } else if (selectedEnabledCount === enabledCount) {
+      // All enabled items selected
       newChecked = true;
       newIndeterminate = false;
     } else {
+      // Partial selection
       newChecked = false;
       newIndeterminate = true;
     }
 
-    // Apply the state
+    // Apply the state to the checkbox
     headerCheckbox.checked = newChecked;
     headerCheckbox.indeterminate = newIndeterminate;
     
@@ -398,33 +474,39 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Update visual state of p-checkbox wrapper
     const pCheckbox = headerCheckbox.closest('.p-checkbox');
     if (pCheckbox) {
-      // Remove any disabled classes
+      // Remove any disabled classes - this is critical
       pCheckbox.classList.remove('p-checkbox-disabled', 'p-disabled');
       
       const box = pCheckbox.querySelector('.p-checkbox-box');
       if (box) {
+        // Remove disabled class from box
         box.classList.remove('p-disabled');
         
-        // Update highlight state
-        if (newChecked || newIndeterminate) {
-          box.classList.add('p-highlight');
-        } else {
-          box.classList.remove('p-highlight');
-        }
-        
-        // Update icon
+        // Clear all states first
+        box.classList.remove('p-highlight');
         const icon = box.querySelector('.p-checkbox-icon');
+        
         if (icon) {
-          icon.classList.remove('pi-check', 'pi-minus');
+          // Reset icon classes
+          icon.className = 'p-checkbox-icon';
+          
           if (newChecked) {
+            box.classList.add('p-highlight');
             icon.classList.add('pi', 'pi-check');
           } else if (newIndeterminate) {
+            box.classList.add('p-highlight');
             icon.classList.add('pi', 'pi-minus');
           } else {
+            // Unchecked state - no icon
             icon.classList.add('pi');
           }
         }
       }
+    }
+
+    // Double-check the checkbox is still enabled after our updates
+    if (headerCheckbox.disabled) {
+      headerCheckbox.disabled = false;
     }
   }
 
@@ -480,6 +562,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     if (item1 === item2) return true;
     if (!item1 || !item2) return false;
     
+    // If table has a dataKey, use that for comparison
     if (this.table.dataKey) {
       const key1 = this.resolveFieldData(item1, this.table.dataKey);
       const key2 = this.resolveFieldData(item2, this.table.dataKey);
@@ -488,6 +571,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
     
+    // Try common ID properties
     const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
     for (const prop of idProps) {
       if (item1[prop] !== undefined && item2[prop] !== undefined) {
@@ -495,6 +579,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       }
     }
     
+    // Fallback to reference equality
     return false;
   }
 
