@@ -110,6 +110,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   }
 
   private initializeHeaderFix() {
+    this.enforceDisabledCheckboxes();
     this.cleanupDisabledFromSelection();
     this.updateHeaderCheckbox();
     this.startHeaderMonitoring();
@@ -141,39 +142,40 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
   private customToggleAll(event: any) {
     this.isProcessingToggle = true;
 
-    // Get current page data
-    const currentData = this.getCurrentPageData();
+    // Get ALL data (not just current page)
+    const allData = this.table.filteredValue || this.table.value || [];
     
-    // Get enabled items only
-    const enabledItems = this.getEnabledItemsFromData(currentData);
+    // We need to determine which items across ALL pages are enabled
+    // For items not on current page, we'll assume they're enabled unless we have info otherwise
+    const currentPageData = this.getCurrentPageData();
+    const currentPageCheckboxes = this.getBodyCheckboxes();
     
-    if (enabledItems.length === 0) {
-      this.isProcessingToggle = false;
-      return;
-    }
+    // Build a map of disabled items from current page
+    const disabledItemsMap = new Map();
+    currentPageData.forEach((item, index) => {
+      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
+        // Mark this item as disabled
+        disabledItemsMap.set(this.getItemKey(item), true);
+      }
+    });
 
-    // Check current selection state
-    const allEnabledSelected = enabledItems.every(item => this.isItemSelected(item));
-    
-    // Build new selection
-    let newSelection: any[] = [];
-    
-    if (this.table.selection && Array.isArray(this.table.selection)) {
-      // Keep existing selection from other pages
-      newSelection = this.table.selection.filter(item => 
-        !currentData.some(pageItem => this.itemsEqual(item, pageItem))
-      );
-    }
+    // Filter all data to exclude disabled items
+    const allEnabledItems = allData.filter(item => {
+      const itemKey = this.getItemKey(item);
+      return !disabledItemsMap.has(itemKey);
+    });
 
-    // Add/remove current page enabled items
+    // Check if all enabled items are currently selected
+    const allEnabledSelected = allEnabledItems.every(item => this.isItemSelected(item));
+
+    // Toggle selection
     if (!allEnabledSelected) {
-      // Add all enabled items from current page
-      newSelection = [...newSelection, ...enabledItems];
+      // Select all enabled items across ALL pages
+      this.table.selection = [...allEnabledItems];
+    } else {
+      // Deselect all
+      this.table.selection = [];
     }
-    // If all were selected, we're deselecting, so don't add them
-
-    // Update selection
-    this.table.selection = newSelection;
     
     // Emit change
     if (this.table.selectionChange) {
@@ -189,6 +191,24 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     }, 50);
   }
 
+  private getItemKey(item: any): string {
+    if (this.table.dataKey) {
+      const key = this.resolveFieldData(item, this.table.dataKey);
+      return String(key);
+    }
+    
+    // Try common ID fields
+    const idProps = ['id', 'ID', '_id', 'key', 'uuid', 'code'];
+    for (const prop of idProps) {
+      if (item[prop] !== undefined) {
+        return String(item[prop]);
+      }
+    }
+    
+    // Fallback to JSON string (not ideal but works)
+    return JSON.stringify(item);
+  }
+
   private getCurrentPageData(): any[] {
     // For paginated tables
     if (this.table.paginator && this.table.rows) {
@@ -201,26 +221,57 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     return this.table.filteredValue || this.table.value || [];
   }
 
-  private getEnabledItemsFromData(data: any[]): any[] {
-    const enabledItems: any[] = [];
+  private enforceDisabledCheckboxes() {
     const checkboxes = this.getBodyCheckboxes();
+    const currentData = this.getCurrentPageData();
     
-    if (checkboxes.length > 0) {
-      // Use actual checkbox state
-      data.forEach((item, index) => {
-        if (index < checkboxes.length) {
-          const checkbox = checkboxes[index];
-          if (!checkbox.disabled) {
-            enabledItems.push(item);
+    checkboxes.forEach((checkbox, index) => {
+      if (index < currentData.length) {
+        const item = currentData[index];
+        
+        // Check if this row should be disabled based on your logic
+        // This is where you'd implement your business logic for disabled rows
+        const shouldBeDisabled = this.isRowDisabled(item, index);
+        
+        if (shouldBeDisabled) {
+          // Disable the checkbox
+          this.renderer.setProperty(checkbox, 'disabled', true);
+          this.renderer.setProperty(checkbox, 'checked', false);
+          
+          // Update visual state
+          const wrapper = checkbox.closest('.p-checkbox');
+          if (wrapper) {
+            this.renderer.addClass(wrapper, 'p-checkbox-disabled');
+            this.renderer.addClass(wrapper, 'p-disabled');
+            
+            const box = wrapper.querySelector('.p-checkbox-box');
+            if (box) {
+              this.renderer.addClass(box, 'p-disabled');
+              this.renderer.removeClass(box, 'p-highlight');
+            }
           }
         }
-      });
-    } else {
-      // If no checkboxes found, assume all are enabled
-      return [...data];
+      }
+    });
+  }
+
+  private isRowDisabled(item: any, index: number): boolean {
+    // Check if there's a custom disable function set on the table
+    // You might need to implement this based on your specific requirements
+    // For example, you might check a property on the item:
+    
+    if (item.disabled !== undefined) {
+      return item.disabled;
     }
     
-    return enabledItems;
+    if (item.selectable !== undefined) {
+      return !item.selectable;
+    }
+    
+    // You can add your custom logic here
+    // For example, check if the current user can select this item
+    
+    return false;
   }
 
   private cleanupDisabledFromSelection() {
@@ -229,20 +280,20 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     }
 
     const currentData = this.getCurrentPageData();
-    const enabledItems = this.getEnabledItemsFromData(currentData);
+    const currentPageCheckboxes = this.getBodyCheckboxes();
+    
+    // Build list of disabled items on current page
+    const disabledItems: any[] = [];
+    currentData.forEach((item, index) => {
+      if (index < currentPageCheckboxes.length && currentPageCheckboxes[index].disabled) {
+        disabledItems.push(item);
+      }
+    });
     
     // Remove disabled items from selection
     const cleanedSelection = this.table.selection.filter(selectedItem => {
-      // Check if this item is in current page
-      const isInCurrentPage = currentData.some(item => this.itemsEqual(item, selectedItem));
-      
-      if (isInCurrentPage) {
-        // If in current page, only keep if enabled
-        return enabledItems.some(item => this.itemsEqual(item, selectedItem));
-      }
-      
-      // Keep items from other pages
-      return true;
+      // Check if this selected item is one of the disabled items on current page
+      return !disabledItems.some(disabledItem => this.itemsEqual(selectedItem, disabledItem));
     });
 
     if (cleanedSelection.length !== this.table.selection.length) {
@@ -296,26 +347,44 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     // Force enable
     this.renderer.setProperty(checkbox, 'disabled', false);
 
-    const currentData = this.getCurrentPageData();
-    const enabledItems = this.getEnabledItemsFromData(currentData);
+    // For header state, we need to consider ALL pages, not just current
+    const allData = this.table.filteredValue || this.table.value || [];
     
-    let checkedCount = 0;
-    let enabledCount = enabledItems.length;
-
-    enabledItems.forEach(item => {
-      if (this.isItemSelected(item)) {
-        checkedCount++;
-      }
-    });
-
-    // Update checkbox state
-    if (enabledCount === 0 || checkedCount === 0) {
+    if (allData.length === 0) {
+      // No data at all
       this.renderer.setProperty(checkbox, 'checked', false);
       this.renderer.setProperty(checkbox, 'indeterminate', false);
-    } else if (checkedCount === enabledCount) {
+      this.updateHeaderVisualState();
+      return;
+    }
+
+    // Get info about current page disabled items
+    const currentPageData = this.getCurrentPageData();
+    const currentPageCheckboxes = this.getBodyCheckboxes();
+    const currentPageDisabledCount = currentPageCheckboxes.filter(cb => cb.disabled).length;
+    
+    // For items not on current page, assume they're enabled
+    // This is a limitation - we can't know the disabled state of items on other pages
+    const currentPageEnabledCount = currentPageData.length - currentPageDisabledCount;
+    const otherPagesCount = allData.length - currentPageData.length;
+    const estimatedTotalEnabled = currentPageEnabledCount + otherPagesCount;
+
+    // Count selected items
+    let selectedCount = 0;
+    if (this.table.selection && Array.isArray(this.table.selection)) {
+      selectedCount = this.table.selection.length;
+    }
+
+    // Update checkbox state based on selection across ALL data
+    if (selectedCount === 0) {
+      this.renderer.setProperty(checkbox, 'checked', false);
+      this.renderer.setProperty(checkbox, 'indeterminate', false);
+    } else if (selectedCount >= estimatedTotalEnabled) {
+      // All enabled items (that we know of) are selected
       this.renderer.setProperty(checkbox, 'checked', true);
       this.renderer.setProperty(checkbox, 'indeterminate', false);
     } else {
+      // Partial selection
       this.renderer.setProperty(checkbox, 'checked', false);
       this.renderer.setProperty(checkbox, 'indeterminate', true);
     }
