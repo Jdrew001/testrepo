@@ -96,9 +96,24 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
     const originalEmit = this.table.onHeaderCheckboxToggle?.emit;
     if (originalEmit) {
       this.table.onHeaderCheckboxToggle.emit = (event: any) => {
-        // Intercept the emit
+        // Prevent the default PrimeNG selection behavior
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        
+        // Handle our custom selection logic
         this.handleSelectAll(event);
         // Don't call the original emit as we're handling it ourselves
+      };
+    }
+
+    // Also try to override the table's internal selection methods if they exist
+    const originalUpdateSelection = (this.table as any).updateSelection;
+    if (originalUpdateSelection) {
+      (this.table as any).updateSelection = (event: any, data: any) => {
+        // Only call original for individual row selections, not header checkbox
+        if (!event?.target?.closest('thead')) {
+          originalUpdateSelection.call(this.table, event, data);
+        }
       };
     }
   }
@@ -124,18 +139,21 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
 
   private attachHeaderCheckboxListeners(headerCheckbox: HTMLInputElement) {
     // Prevent default behavior and handle our own
-    this.headerCheckboxClickListener = () => {
-      // Use setTimeout to ensure we process after PrimeNG's handlers
-      setTimeout(() => {
-        this.handleHeaderCheckboxAction(headerCheckbox);
-      }, 0);
+    this.headerCheckboxClickListener = (event: Event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      
+      // Toggle the checkbox state manually
+      const willBeChecked = !headerCheckbox.checked;
+      headerCheckbox.checked = willBeChecked;
+      
+      // Handle the action immediately without setTimeout
+      this.handleHeaderCheckboxAction(headerCheckbox);
     };
 
-    this.headerCheckboxChangeListener = () => {
-      // Prevent the change from propagating
-      setTimeout(() => {
-        this.handleHeaderCheckboxAction(headerCheckbox);
-      }, 0);
+    this.headerCheckboxChangeListener = (event: Event) => {
+      event.stopPropagation();
+      event.preventDefault();
     };
 
     // Use capture phase to intercept before PrimeNG
@@ -165,11 +183,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       this.deselectAll();
     }
 
-    // Ensure the checkbox state is correct
-    setTimeout(() => {
-      this.updateHeaderCheckboxState();
-      this.uncheckDisabledCheckboxes();
-    }, 0);
+    // Update the header state immediately
+    this.updateHeaderCheckboxState();
   }
 
   private handleSelectAll(event: any) {
@@ -198,13 +213,8 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update the visual state of checkboxes
+    // Update the visual state of checkboxes immediately
     this.updateBodyCheckboxes();
-    
-    // Ensure disabled checkboxes stay unchecked
-    setTimeout(() => {
-      this.uncheckDisabledCheckboxes();
-    }, 0);
   }
 
   private deselectAll() {
@@ -216,7 +226,7 @@ export class SelectionFixDirective implements OnInit, OnDestroy, AfterViewInit {
       this.table.selectionChange.emit(this.table.selection);
     }
 
-    // Update the visual state of checkboxes
+    // Update the visual state of checkboxes immediately
     this.updateBodyCheckboxes();
   }
 
