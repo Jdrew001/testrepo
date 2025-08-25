@@ -1,4 +1,4 @@
-import { Directive, Host, Input, OnInit, AfterViewInit } from '@angular/core';
+import { Directive, Host, Input, OnInit, AfterViewInit, ElementRef } from '@angular/core';
 import { Table } from 'primeng/table';
 
 @Directive({
@@ -7,36 +7,14 @@ import { Table } from 'primeng/table';
 export class SelectionFixDirective implements OnInit, AfterViewInit {
 
   @Input() selectableItems: any[] = [];
+  private headerClickListener: any;
 
-  constructor(@Host() private table: Table) {}
+  constructor(
+    @Host() private table: Table,
+    private el: ElementRef
+  ) {}
 
   ngOnInit() {
-    // Override the internal toggle method
-    (this.table as any).toggleRowsWithCheckbox = (event: any, check: boolean) => {
-      const data = this.table.filteredValue || this.table.value || [];
-      if (!data.length) return;
-
-      // Filter to only selectable items
-      const itemsToSelect = data.filter(item => this.isSelectable(item));
-      
-      if (check) {
-        // Select all selectable items
-        this.table.selection = [...itemsToSelect];
-      } else {
-        // Clear selection
-        this.table.selection = [];
-      }
-
-      // Update selection keys
-      this.updateSelectionKeys();
-      
-      // Emit events
-      this.table.onHeaderCheckboxToggle.emit({ originalEvent: event, checked: check });
-      if (this.table.selectionChange) {
-        this.table.selectionChange.emit(this.table.selection);
-      }
-    };
-
     // Override the header checkbox state check
     (this.table as any).isAllRowsSelected = () => {
       const data = this.table.filteredValue || this.table.value || [];
@@ -54,41 +32,168 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
   }
 
   ngAfterViewInit() {
-    // Clean up selection on init
-    setTimeout(() => this.cleanSelection(), 0);
-    
-    // Monitor for header being disabled
-    setInterval(() => this.keepHeaderEnabled(), 100);
+    setTimeout(() => {
+      this.setupHeaderCheckbox();
+      this.cleanSelection();
+    }, 100);
+
+    // Re-setup after pagination
+    if (this.table.onPage) {
+      this.table.onPage.subscribe(() => {
+        setTimeout(() => this.setupHeaderCheckbox(), 100);
+      });
+    }
   }
 
-  private keepHeaderEnabled() {
-    const headerCheckbox = (this.table as any).headerCheckbox;
-    if (headerCheckbox && (this.table.value?.length > 0)) {
-      // Only enable if there are selectable items
-      const hasSelectableItems = (this.table.value || []).some(item => this.isSelectable(item));
-      headerCheckbox.disabled = !hasSelectableItems;
+  private setupHeaderCheckbox() {
+    // Find the header checkbox
+    const headerCheckbox = this.el.nativeElement.querySelector('thead input[type="checkbox"]');
+    if (!headerCheckbox) {
+      setTimeout(() => this.setupHeaderCheckbox(), 50);
+      return;
     }
+
+    // Remove old listener if exists
+    if (this.headerClickListener) {
+      headerCheckbox.removeEventListener('click', this.headerClickListener);
+    }
+
+    // Add our own click handler
+    this.headerClickListener = (event: Event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      
+      this.toggleAll();
+    };
+
+    headerCheckbox.addEventListener('click', this.headerClickListener, true);
+
+    // Keep it enabled
+    setInterval(() => {
+      if (headerCheckbox && this.table.value?.length > 0) {
+        const hasSelectableItems = (this.table.value || []).some(item => this.isSelectable(item));
+        headerCheckbox.disabled = !hasSelectableItems;
+      }
+    }, 100);
+  }
+
+  private toggleAll() {
+    const data = this.table.filteredValue || this.table.value || [];
+    if (!data.length) return;
+
+    // Get selectable items
+    const selectableData = data.filter(item => this.isSelectable(item));
+    if (!selectableData.length) return;
+
+    // IMPORTANT: Filter out already selected items from selectable items
+    const currentSelection = this.table.selection || [];
+    const selectableNotYetSelected = selectableData.filter(item => 
+      !currentSelection.some(selected => this.equals(item, selected))
+    );
+
+    // Check if all selectable items are already selected
+    const allSelectableAreSelected = selectableData.every(item => 
+      currentSelection.some(selected => this.equals(item, selected))
+    );
+
+    // Toggle logic
+    if (allSelectableAreSelected) {
+      // Deselect all selectable items (keep non-selectable selected items)
+      this.table.selection = currentSelection.filter(selected => 
+        !selectableData.some(selectable => this.equals(selected, selectable))
+      );
+    } else {
+      // Add unselected selectable items to current selection
+      this.table.selection = [
+        ...currentSelection,
+        ...selectableNotYetSelected
+      ];
+    }
+
+    // Update keys
+    this.updateSelectionKeys();
+
+    // Emit change
+    if (this.table.selectionChange) {
+      this.table.selectionChange.emit(this.table.selection);
+    }
+
+    // Update visual state
+    this.updateCheckboxes();
+  }
+
+  private updateCheckboxes() {
+    // Update header checkbox state
+    const headerCheckbox = this.el.nativeElement.querySelector('thead input[type="checkbox"]');
+    if (headerCheckbox) {
+      const data = this.table.filteredValue || this.table.value || [];
+      const selectableData = data.filter(item => this.isSelectable(item));
+      const selectedCount = this.table.selection?.length || 0;
+      
+      if (selectedCount === 0) {
+        headerCheckbox.checked = false;
+        headerCheckbox.indeterminate = false;
+      } else if (selectedCount === selectableData.length && selectableData.length > 0) {
+        headerCheckbox.checked = true;
+        headerCheckbox.indeterminate = false;
+      } else {
+        headerCheckbox.checked = false;
+        headerCheckbox.indeterminate = true;
+      }
+    }
+
+    // Update body checkboxes
+    const bodyCheckboxes = this.el.nativeElement.querySelectorAll('tbody input[type="checkbox"]');
+    const currentPageData = this.getCurrentPageData();
+    
+    bodyCheckboxes.forEach((checkbox: HTMLInputElement, index: number) => {
+      if (index < currentPageData.length) {
+        const item = currentPageData[index];
+        checkbox.checked = this.table.selection?.some(selected => this.equals(item, selected)) || false;
+        checkbox.disabled = !this.isSelectable(item);
+      }
+    });
+  }
+
+  private getCurrentPageData(): any[] {
+    if (this.table.paginator && this.table.rows) {
+      const first = this.table.first || 0;
+      return (this.table.filteredValue || this.table.value || []).slice(first, first + this.table.rows);
+    }
+    return this.table.filteredValue || this.table.value || [];
   }
 
   private cleanSelection() {
     if (!this.table.selection || !Array.isArray(this.table.selection)) return;
     
-    // Remove non-selectable items from selection
+    // Remove items that are NOT in selectableItems
     const cleaned = this.table.selection.filter(selected => this.isSelectable(selected));
     
-    if (cleaned.length !== this.table.selection.length) {
-      this.table.selection = cleaned;
+    // Also remove any duplicates (items with same entityId and entityType)
+    const uniqueCleaned: any[] = [];
+    const seen = new Set<string>();
+    
+    cleaned.forEach(item => {
+      const key = `${item.entityType}_${item.entityId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueCleaned.push(item);
+      }
+    });
+    
+    if (uniqueCleaned.length !== this.table.selection.length) {
+      this.table.selection = uniqueCleaned;
       this.updateSelectionKeys();
+      if (this.table.selectionChange) {
+        this.table.selectionChange.emit(this.table.selection);
+      }
     }
   }
 
   private isSelectable(item: any): boolean {
-    // If no selectableItems provided, everything is selectable
     if (!this.selectableItems || this.selectableItems.length === 0) {
       return true;
     }
-    
-    // Check if item is in the selectable list
     return this.selectableItems.some(selectable => this.equals(item, selectable));
   }
 
@@ -109,7 +214,6 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     if (a === b) return true;
     if (!a || !b) return false;
     
-    // Always use entityId + entityType for comparison
     if (a.entityId !== undefined && a.entityType !== undefined &&
         b.entityId !== undefined && b.entityType !== undefined) {
       return a.entityId === b.entityId && a.entityType === b.entityType;
