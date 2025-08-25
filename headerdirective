@@ -23,9 +23,29 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       return this.areAllSelectableItemsSelected();
     };
     
-    // Override updateHeaderCheckboxState to use our logic
-    const originalUpdateHeaderCheckboxState = (this.table as any).updateHeaderCheckboxState;
+    // Override updateHeaderCheckboxState to properly sync state
     (this.table as any).updateHeaderCheckboxState = () => {
+      const allSelected = this.areAllSelectableItemsSelected();
+      const tableAny = this.table as any;
+      
+      // Update internal state
+      if (tableAny.headerCheckbox) {
+        tableAny.headerCheckbox.checked = allSelected;
+        // Use PrimeNG checkbox's onChange to properly update
+        if (tableAny.headerCheckbox.onChange) {
+          tableAny.headerCheckbox.onChange.emit(allSelected);
+        }
+        // Update the model
+        if (tableAny.headerCheckbox.model !== allSelected) {
+          tableAny.headerCheckbox.model = allSelected;
+        }
+        // Trigger change detection
+        if (tableAny.headerCheckbox.cd) {
+          tableAny.headerCheckbox.cd.markForCheck();
+        }
+      }
+      
+      // Then run our custom update
       this.updateHeaderState();
     };
 
@@ -34,11 +54,7 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       this.table.selectionChange.subscribe(() => {
         this.cleanSelection();
         setTimeout(() => {
-          this.updateHeaderState();
-          // Call PrimeNG's internal update
-          if (originalUpdateHeaderCheckboxState) {
-            originalUpdateHeaderCheckboxState.call(this.table);
-          }
+          (this.table as any).updateHeaderCheckboxState();
         }, 0);
       });
     }
@@ -95,6 +111,11 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
+    
+    // Force update header checkbox state after toggle
+    setTimeout(() => {
+      this.updateHeaderState();
+    }, 0);
   }
 
   private areAllSelectableItemsSelected(): boolean {
