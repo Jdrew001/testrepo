@@ -21,18 +21,6 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
         setTimeout(() => this.updateCheckboxes(), 0);
       });
     }
-  }.table.filteredValue || this.table.value || [];
-      if (!data.length) return false;
-      
-      const selectableData = data.filter(item => this.isSelectable(item));
-      if (!selectableData.length) return false;
-      
-      if (!this.table.selection || !Array.isArray(this.table.selection)) return false;
-      
-      return selectableData.every(item => 
-        this.table.selection.some(selected => this.equals(item, selected))
-      );
-    };
   }
 
   ngAfterViewInit() {
@@ -150,7 +138,6 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       // Use ALL data (not just current page)
       const allData = this.table.filteredValue || this.table.value || [];
       const allSelectableItems = allData.filter(item => this.isSelectable(item));
-      const selectedCount = this.table.selection?.length || 0;
       
       // Count how many selectable items are selected
       const selectedSelectableCount = allSelectableItems.filter(item =>
@@ -205,7 +192,7 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
   private cleanSelection() {
     if (!this.table.selection || !Array.isArray(this.table.selection)) return;
     
-    // Remove items that are NOT in selectableItems
+    // Remove items that ARE in previouslySelected (they shouldn't be selectable)
     const cleaned = this.table.selection.filter(selected => this.isSelectable(selected));
     
     // Also remove any duplicates (items with same entityId and entityType)
