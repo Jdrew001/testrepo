@@ -1,4 +1,4 @@
-import { Directive, Host, Input, OnInit, AfterViewInit } from '@angular/core';
+import { Directive, Host, Input, OnInit, AfterViewInit, ChangeDetectorRef, Optional } from '@angular/core';
 import { Table } from 'primeng/table';
 
 @Directive({
@@ -9,7 +9,7 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
   @Input() previouslySelected: any[] = [];  // Items that were already selected before
   private checkInterval: any;
 
-  constructor(@Host() private table: Table) {}
+  constructor(@Host() private table: Table, @Optional() private cdr: ChangeDetectorRef) {}
 
   ngOnInit() {
     // Override PrimeNG's internal toggle method
@@ -36,12 +36,26 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     setTimeout(() => {
       this.cleanSelection();
       this.updateHeaderState();
+      this.attachHeaderCheckboxListener();
     }, 0);
 
     // Keep header enabled/disabled based on selectable items
     this.checkInterval = setInterval(() => {
       this.updateHeaderState();
     }, 100);
+  }
+
+  private attachHeaderCheckboxListener() {
+    // Add click listener to header checkbox to ensure proper state
+    const headerCheckboxElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox');
+    if (headerCheckboxElement) {
+      headerCheckboxElement.addEventListener('click', (event: Event) => {
+        // Let the directive handle the logic
+        setTimeout(() => {
+          this.updateHeaderState();
+        }, 10);
+      });
+    }
   }
 
   ngOnDestroy() {
@@ -153,18 +167,61 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       if (selectedCount === 0) {
         headerCheckbox.checked = false;
         (this.table as any).headerCheckboxFocus = false;
+        // Update visual state
+        setTimeout(() => {
+          const checkboxBox = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-box');
+          const inputElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox input');
+          if (checkboxBox) {
+            checkboxBox.classList.remove('p-highlight');
+          }
+          if (inputElement) {
+            inputElement.checked = false;
+            inputElement.indeterminate = false;
+          }
+        }, 0);
       } else if (selectedCount === selectableItems.length) {
         headerCheckbox.checked = true;
         (this.table as any).headerCheckboxFocus = true;
+        // Update visual state to show as checked
+        setTimeout(() => {
+          const checkboxBox = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-box');
+          const inputElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox input');
+          const iconElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-icon');
+          if (checkboxBox) {
+            checkboxBox.classList.add('p-highlight');
+          }
+          if (inputElement) {
+            inputElement.checked = true;
+            inputElement.indeterminate = false;
+          }
+          if (iconElement) {
+            iconElement.classList.remove('pi-minus');
+            iconElement.classList.add('pi-check');
+          }
+        }, 0);
+        // Trigger change detection to update the view
+        if (this.cdr) {
+          this.cdr.detectChanges();
+        }
       } else {
         // Partial selection - show indeterminate state
         headerCheckbox.checked = false;
         (this.table as any).headerCheckboxFocus = false;
         // Set indeterminate state if supported
         setTimeout(() => {
+          const checkboxBox = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-box');
           const inputElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox input');
+          const iconElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-icon');
+          if (checkboxBox) {
+            checkboxBox.classList.add('p-highlight');
+          }
           if (inputElement) {
+            inputElement.checked = false;
             inputElement.indeterminate = true;
+          }
+          if (iconElement) {
+            iconElement.classList.remove('pi-check');
+            iconElement.classList.add('pi-minus');
           }
         }, 0);
       }
