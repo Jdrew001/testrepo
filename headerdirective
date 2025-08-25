@@ -1,4 +1,4 @@
-import { Directive, Host, OnInit, AfterViewInit } from '@angular/core';
+import { Directive, Host, Input, OnInit, AfterViewInit } from '@angular/core';
 import { Table } from 'primeng/table';
 
 @Directive({
@@ -6,23 +6,22 @@ import { Table } from 'primeng/table';
 })
 export class SelectionFixDirective implements OnInit, AfterViewInit {
 
+  @Input() selectableItems: any[] = [];
+
   constructor(@Host() private table: Table) {}
 
   ngOnInit() {
-    // Store original method
-    const originalToggleRowsWithCheckbox = (this.table as any).toggleRowsWithCheckbox;
-    
     // Override the internal toggle method
     (this.table as any).toggleRowsWithCheckbox = (event: any, check: boolean) => {
       const data = this.table.filteredValue || this.table.value || [];
       if (!data.length) return;
 
-      // Filter out disabled items
-      const selectableItems = data.filter(item => !this.isDisabled(item));
+      // Filter to only selectable items
+      const itemsToSelect = data.filter(item => this.isSelectable(item));
       
       if (check) {
-        // Select all enabled items
-        this.table.selection = [...selectableItems];
+        // Select all selectable items
+        this.table.selection = [...itemsToSelect];
       } else {
         // Clear selection
         this.table.selection = [];
@@ -39,17 +38,16 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     };
 
     // Override the header checkbox state check
-    const originalIsAllRowsSelected = (this.table as any).isAllRowsSelected;
     (this.table as any).isAllRowsSelected = () => {
       const data = this.table.filteredValue || this.table.value || [];
       if (!data.length) return false;
       
-      const selectableItems = data.filter(item => !this.isDisabled(item));
-      if (!selectableItems.length) return false;
+      const selectableData = data.filter(item => this.isSelectable(item));
+      if (!selectableData.length) return false;
       
       if (!this.table.selection || !Array.isArray(this.table.selection)) return false;
       
-      return selectableItems.every(item => 
+      return selectableData.every(item => 
         this.table.selection.some(selected => this.equals(item, selected))
       );
     };
@@ -66,21 +64,17 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
   private keepHeaderEnabled() {
     const headerCheckbox = (this.table as any).headerCheckbox;
     if (headerCheckbox && (this.table.value?.length > 0)) {
-      if (headerCheckbox.disabled) {
-        headerCheckbox.disabled = false;
-      }
+      // Only enable if there are selectable items
+      const hasSelectableItems = (this.table.value || []).some(item => this.isSelectable(item));
+      headerCheckbox.disabled = !hasSelectableItems;
     }
   }
 
   private cleanSelection() {
     if (!this.table.selection || !Array.isArray(this.table.selection)) return;
     
-    const data = this.table.filteredValue || this.table.value || [];
-    const selectableItems = data.filter(item => !this.isDisabled(item));
-    
-    const cleaned = this.table.selection.filter(selected =>
-      selectableItems.some(item => this.equals(item, selected))
-    );
+    // Remove non-selectable items from selection
+    const cleaned = this.table.selection.filter(selected => this.isSelectable(selected));
     
     if (cleaned.length !== this.table.selection.length) {
       this.table.selection = cleaned;
@@ -88,8 +82,17 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     }
   }
 
+  private isSelectable(item: any): boolean {
+    // If no selectableItems provided, everything is selectable
+    if (!this.selectableItems || this.selectableItems.length === 0) {
+      return true;
+    }
+    
+    // Check if item is in the selectable list
+    return this.selectableItems.some(selectable => this.equals(item, selectable));
+  }
+
   private updateSelectionKeys() {
-    // Always use entityId + entityType as the composite key
     const keys: any = {};
     if (Array.isArray(this.table.selection)) {
       this.table.selection.forEach(item => {
@@ -100,10 +103,6 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       });
     }
     (this.table as any).selectionKeys = keys;
-  }
-
-  private isDisabled(item: any): boolean {
-    return item.disabled === true || item.selectable === false;
   }
 
   private equals(a: any, b: any): boolean {
@@ -117,22 +116,5 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     }
     
     return false;
-  }
-
-  private resolveFieldData(data: any, field: string): any {
-    // For composite key, always return entityType_entityId
-    if (data.entityId !== undefined && data.entityType !== undefined) {
-      return `${data.entityType}_${data.entityId}`;
-    }
-    
-    if (field.indexOf('.') === -1) return data[field];
-    
-    const fields = field.split('.');
-    let value = data;
-    for (const f of fields) {
-      if (value == null) return null;
-      value = value[f];
-    }
-    return value;
   }
 }
