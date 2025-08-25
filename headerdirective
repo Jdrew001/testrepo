@@ -1,4 +1,4 @@
-import { Directive, Host, Input, OnInit, AfterViewInit, ElementRef } from '@angular/core';
+import { Directive, Host, Input, OnInit, AfterViewInit } from '@angular/core';
 import { Table } from 'primeng/table';
 
 @Directive({
@@ -7,195 +7,159 @@ import { Table } from 'primeng/table';
 export class SelectionFixDirective implements OnInit, AfterViewInit {
 
   @Input() previouslySelected: any[] = [];  // Items that were already selected before
-  private headerClickListener: any;
+  private checkInterval: any;
 
-  constructor(
-    @Host() private table: Table,
-    private el: ElementRef
-  ) {}
+  constructor(@Host() private table: Table) {}
 
   ngOnInit() {
-    // Listen to selection changes to update header state
+    // Override PrimeNG's internal toggle method
+    const originalToggleRowsWithCheckbox = (this.table as any).toggleRowsWithCheckbox;
+    (this.table as any).toggleRowsWithCheckbox = (event: any, check: boolean) => {
+      this.handleToggleAll(event, check);
+    };
+
+    // Override the method that checks if all rows are selected
+    (this.table as any).allRowsSelected = () => {
+      return this.areAllSelectableItemsSelected();
+    };
+
+    // Listen to selection changes
     if (this.table.selectionChange) {
       this.table.selectionChange.subscribe(() => {
-        setTimeout(() => this.updateCheckboxes(), 0);
+        this.cleanSelection();
+        this.updateHeaderState();
       });
     }
   }
 
   ngAfterViewInit() {
     setTimeout(() => {
-      this.setupHeaderCheckbox();
       this.cleanSelection();
-    }, 100);
+      this.updateHeaderState();
+    }, 0);
 
-    // Re-setup after pagination
-    if (this.table.onPage) {
-      this.table.onPage.subscribe(() => {
-        setTimeout(() => this.setupHeaderCheckbox(), 100);
-      });
-    }
-  }
-
-  private setupHeaderCheckbox() {
-    // Find the header checkbox
-    const headerCheckbox = this.el.nativeElement.querySelector('thead input[type="checkbox"]');
-    if (!headerCheckbox) {
-      setTimeout(() => this.setupHeaderCheckbox(), 50);
-      return;
-    }
-
-    // Remove old listener if exists
-    if (this.headerClickListener) {
-      headerCheckbox.removeEventListener('click', this.headerClickListener);
-    }
-
-    // Add our own click handler
-    this.headerClickListener = (event: Event) => {
-      event.stopPropagation();
-      event.preventDefault();
-      
-      this.toggleAll();
-    };
-
-    headerCheckbox.addEventListener('click', this.headerClickListener, true);
-
-    // Keep it enabled ONLY if there are selectable items
-    setInterval(() => {
-      if (headerCheckbox && this.table.value?.length > 0) {
-        // Check if ANY item is selectable (not previously selected)
-        const hasSelectableItems = (this.table.value || []).some(item => this.isSelectable(item));
-        
-        // Disable header if ALL items are previously selected
-        headerCheckbox.disabled = !hasSelectableItems;
-        
-        // Update visual state
-        const wrapper = headerCheckbox.closest('.p-checkbox');
-        if (wrapper) {
-          if (!hasSelectableItems) {
-            wrapper.classList.add('p-checkbox-disabled', 'p-disabled');
-          } else {
-            wrapper.classList.remove('p-checkbox-disabled', 'p-disabled');
-          }
-        }
-      }
+    // Keep header enabled/disabled based on selectable items
+    this.checkInterval = setInterval(() => {
+      this.updateHeaderState();
     }, 100);
   }
 
-  private toggleAll() {
-    // Get ALL data (not just current page) - handles 10+ records across pages
+  ngOnDestroy() {
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval);
+    }
+  }
+
+  private handleToggleAll(event: any, check: boolean) {
+    // Get ALL data across all pages
     const allData = this.table.filteredValue || this.table.value || [];
     if (!allData.length) return;
 
-    // Get ALL selectable items across ALL pages
-    const allSelectableItems = allData.filter(item => this.isSelectable(item));
-    if (!allSelectableItems.length) {
-      // All items are previously selected, nothing to do
+    // Get only selectable items (not previously selected)
+    const selectableItems = allData.filter(item => this.isSelectable(item));
+    
+    if (!selectableItems.length) {
+      // Nothing to select/deselect
       return;
     }
 
-    // Filter out already selected items from selectable items
-    const currentSelection = this.table.selection || [];
-    const notYetSelected = allSelectableItems.filter(item => 
-      !currentSelection.some(selected => this.equals(item, selected))
-    );
-
-    // Check if all selectable items are already selected
-    const allSelectableAreSelected = allSelectableItems.every(item => 
-      currentSelection.some(selected => this.equals(item, selected))
-    );
-
-    // Toggle logic
-    if (allSelectableAreSelected) {
-      // Deselect all selectable items (preserve previously selected items in selection)
-      this.table.selection = currentSelection.filter(selected => 
-        !allSelectableItems.some(selectable => this.equals(selected, selectable))
-      );
+    if (check) {
+      // Select all selectable items
+      this.table.selection = [...selectableItems];
     } else {
-      // Add ALL unselected selectable items to current selection (across all pages)
-      this.table.selection = [
-        ...currentSelection,
-        ...notYetSelected
-      ];
+      // Clear selection
+      this.table.selection = [];
     }
 
-    // Update keys
+    // Update PrimeNG's internal selection keys
     this.updateSelectionKeys();
-
-    // Emit change
+    
+    // Emit events
+    this.table.onHeaderCheckboxToggle.emit({
+      originalEvent: event,
+      checked: check
+    });
+    
     if (this.table.selectionChange) {
       this.table.selectionChange.emit(this.table.selection);
     }
-
-    // Update visual state
-    this.updateCheckboxes();
   }
 
-  private updateCheckboxes() {
-    // Update header checkbox state
-    const headerCheckbox = this.el.nativeElement.querySelector('thead input[type="checkbox"]');
-    if (headerCheckbox) {
-      // Use ALL data (not just current page)
-      const allData = this.table.filteredValue || this.table.value || [];
-      const allSelectableItems = allData.filter(item => this.isSelectable(item));
-      
-      // Count how many selectable items are selected
-      const selectedSelectableCount = allSelectableItems.filter(item =>
+  private areAllSelectableItemsSelected(): boolean {
+    const allData = this.table.filteredValue || this.table.value || [];
+    if (!allData.length) return false;
+    
+    const selectableItems = allData.filter(item => this.isSelectable(item));
+    if (!selectableItems.length) return false;
+    
+    if (!this.table.selection || !Array.isArray(this.table.selection)) {
+      return false;
+    }
+    
+    // Check if every selectable item is in the selection
+    return selectableItems.every(item =>
+      this.table.selection.some(selected => this.equals(item, selected))
+    );
+  }
+
+  private updateHeaderState() {
+    // Access PrimeNG's internal header checkbox reference
+    const headerCheckbox = (this.table as any).headerCheckbox;
+    if (!headerCheckbox) return;
+
+    const allData = this.table.filteredValue || this.table.value || [];
+    const selectableItems = allData.filter(item => this.isSelectable(item));
+    const hasSelectableItems = selectableItems.length > 0;
+    
+    // Disable header checkbox if no selectable items (all items are previously selected)
+    if (headerCheckbox.disabled !== !hasSelectableItems) {
+      headerCheckbox.disabled = !hasSelectableItems;
+      // Also update the native element if it exists
+      if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
+        headerCheckbox.el.nativeElement.disabled = !hasSelectableItems;
+      }
+    }
+
+    // Update the checked/indeterminate state only if there are selectable items
+    if (hasSelectableItems) {
+      const selectedCount = selectableItems.filter(item =>
         this.table.selection?.some(selected => this.equals(item, selected))
       ).length;
       
-      if (allSelectableItems.length === 0) {
-        // No selectable items - header should be disabled
+      if (selectedCount === 0) {
         headerCheckbox.checked = false;
-        headerCheckbox.indeterminate = false;
-        headerCheckbox.disabled = true;
-      } else if (selectedSelectableCount === 0) {
-        // No selection
-        headerCheckbox.checked = false;
-        headerCheckbox.indeterminate = false;
-        headerCheckbox.disabled = false;
-      } else if (selectedSelectableCount === allSelectableItems.length) {
-        // All selectable items are selected
+        (this.table as any).headerCheckboxFocus = false;
+      } else if (selectedCount === selectableItems.length) {
         headerCheckbox.checked = true;
-        headerCheckbox.indeterminate = false;
-        headerCheckbox.disabled = false;
+        (this.table as any).headerCheckboxFocus = true;
       } else {
-        // Partial selection
+        // Partial selection - show indeterminate state
         headerCheckbox.checked = false;
-        headerCheckbox.indeterminate = true;
-        headerCheckbox.disabled = false;
+        (this.table as any).headerCheckboxFocus = false;
+        // Set indeterminate state if supported
+        if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
+          headerCheckbox.el.nativeElement.indeterminate = true;
+        }
+      }
+    } else {
+      // When all items are previously selected, ensure checkbox appears unchecked and disabled
+      headerCheckbox.checked = false;
+      (this.table as any).headerCheckboxFocus = false;
+      if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
+        headerCheckbox.el.nativeElement.indeterminate = false;
       }
     }
-
-    // Update body checkboxes for current page only
-    const bodyCheckboxes = this.el.nativeElement.querySelectorAll('tbody input[type="checkbox"]');
-    const currentPageData = this.getCurrentPageData();
-    
-    bodyCheckboxes.forEach((checkbox: HTMLInputElement, index: number) => {
-      if (index < currentPageData.length) {
-        const item = currentPageData[index];
-        checkbox.checked = this.table.selection?.some(selected => this.equals(item, selected)) || false;
-        // Disable if item is previously selected
-        checkbox.disabled = !this.isSelectable(item);
-      }
-    });
-  }
-
-  private getCurrentPageData(): any[] {
-    if (this.table.paginator && this.table.rows) {
-      const first = this.table.first || 0;
-      return (this.table.filteredValue || this.table.value || []).slice(first, first + this.table.rows);
-    }
-    return this.table.filteredValue || this.table.value || [];
   }
 
   private cleanSelection() {
     if (!this.table.selection || !Array.isArray(this.table.selection)) return;
     
-    // Remove items that ARE in previouslySelected (they shouldn't be selectable)
-    const cleaned = this.table.selection.filter(selected => this.isSelectable(selected));
+    // Remove previously selected items from current selection
+    const cleaned = this.table.selection.filter(selected => 
+      this.isSelectable(selected)
+    );
     
-    // Also remove any duplicates (items with same entityId and entityType)
+    // Remove duplicates
     const uniqueCleaned: any[] = [];
     const seen = new Set<string>();
     
@@ -210,22 +174,19 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     if (uniqueCleaned.length !== this.table.selection.length) {
       this.table.selection = uniqueCleaned;
       this.updateSelectionKeys();
-      if (this.table.selectionChange) {
-        this.table.selectionChange.emit(this.table.selection);
-      }
     }
   }
 
   private isSelectable(item: any): boolean {
-    // If no previously selected list provided, everything is selectable
     if (!this.previouslySelected || this.previouslySelected.length === 0) {
       return true;
     }
-    // Item is selectable if it's NOT in the previously selected list
+    // Item is selectable if NOT in previously selected list
     return !this.previouslySelected.some(selected => this.equals(item, selected));
   }
 
   private updateSelectionKeys() {
+    // Update PrimeNG's internal selection tracking
     const keys: any = {};
     if (Array.isArray(this.table.selection)) {
       this.table.selection.forEach(item => {
