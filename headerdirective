@@ -7,6 +7,7 @@ import { Table } from 'primeng/table';
 export class SelectionFixDirective implements OnInit, AfterViewInit {
 
   @Input() previouslySelected: any[] = [];  // Items that were already selected before
+  @Input() headerCheckbox: any;  // Reference to the header checkbox component
   private checkInterval: any;
 
   constructor(@Host() private table: Table, @Optional() private cdr: ChangeDetectorRef) {}
@@ -26,22 +27,25 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     // Override updateHeaderCheckboxState to properly sync state
     (this.table as any).updateHeaderCheckboxState = () => {
       const allSelected = this.areAllSelectableItemsSelected();
-      const tableAny = this.table as any;
       
-      // Update internal state
-      if (tableAny.headerCheckbox) {
-        tableAny.headerCheckbox.checked = allSelected;
-        // Use PrimeNG checkbox's onChange to properly update
-        if (tableAny.headerCheckbox.onChange) {
-          tableAny.headerCheckbox.onChange.emit(allSelected);
+      // Update the header checkbox using our input reference
+      if (this.headerCheckbox) {
+        this.headerCheckbox.checked = allSelected;
+        // Use PrimeNG checkbox's writeValue to properly update
+        if (this.headerCheckbox.writeValue) {
+          this.headerCheckbox.writeValue(allSelected);
+        }
+        // Emit change event
+        if (this.headerCheckbox.onChange) {
+          this.headerCheckbox.onChange.emit(allSelected);
         }
         // Update the model
-        if (tableAny.headerCheckbox.model !== allSelected) {
-          tableAny.headerCheckbox.model = allSelected;
+        if (this.headerCheckbox.model !== allSelected) {
+          this.headerCheckbox.model = allSelected;
         }
         // Trigger change detection
-        if (tableAny.headerCheckbox.cd) {
-          tableAny.headerCheckbox.cd.markForCheck();
+        if (this.headerCheckbox.cd) {
+          this.headerCheckbox.cd.markForCheck();
         }
       }
       
@@ -140,26 +144,21 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     const selectableItems = allData.filter(item => this.isSelectable(item));
     const hasSelectableItems = selectableItems.length > 0;
     
-    // Update PrimeNG's internal header checkbox state
-    const tableAny = this.table as any;
-    
     if (!hasSelectableItems) {
       // Disable when no selectable items (all are previously selected)
-      tableAny.headerCheckboxDisabled = true;
-      if (tableAny.headerCheckbox) {
-        tableAny.headerCheckbox.disabled = true;
-        tableAny.headerCheckbox.checked = false;
+      if (this.headerCheckbox) {
+        this.headerCheckbox.disabled = true;
+        this.headerCheckbox.checked = false;
         // Force update the checkbox component
-        if (tableAny.headerCheckbox.writeValue) {
-          tableAny.headerCheckbox.writeValue(false);
+        if (this.headerCheckbox.writeValue) {
+          this.headerCheckbox.writeValue(false);
         }
-        if (tableAny.headerCheckbox.cd) {
-          tableAny.headerCheckbox.cd.detectChanges();
+        if (this.headerCheckbox.cd) {
+          this.headerCheckbox.cd.detectChanges();
         }
       }
     } else {
       // Enable when there are selectable items
-      tableAny.headerCheckboxDisabled = false;
       
       // Check how many selectable items are selected
       const selectedCount = selectableItems.filter(item =>
@@ -167,30 +166,31 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       ).length;
       
       const allSelected = selectedCount === selectableItems.length && selectedCount > 0;
-      const partialSelected = selectedCount > 0 && selectedCount < selectableItems.length;
       
-      if (tableAny.headerCheckbox) {
-        tableAny.headerCheckbox.disabled = false;
-        tableAny.headerCheckbox.checked = allSelected;
+      if (this.headerCheckbox) {
+        this.headerCheckbox.disabled = false;
+        this.headerCheckbox.checked = allSelected;
         
         // Force update the checkbox component with the correct value
-        if (tableAny.headerCheckbox.writeValue) {
-          tableAny.headerCheckbox.writeValue(allSelected);
+        if (this.headerCheckbox.writeValue) {
+          this.headerCheckbox.writeValue(allSelected);
         }
         
-        // Handle indeterminate state for partial selection
-        if (tableAny.headerCheckbox.updateModel) {
-          tableAny.headerCheckbox.updateModel(allSelected);
+        // Handle model update
+        if (this.headerCheckbox.model !== allSelected) {
+          this.headerCheckbox.model = allSelected;
+        }
+        
+        // Emit change event if needed
+        if (this.headerCheckbox.onChange && this.headerCheckbox.onChange.observers?.length > 0) {
+          this.headerCheckbox.onChange.emit(allSelected);
         }
         
         // Force Angular change detection on the checkbox
-        if (tableAny.headerCheckbox.cd) {
-          tableAny.headerCheckbox.cd.detectChanges();
+        if (this.headerCheckbox.cd) {
+          this.headerCheckbox.cd.detectChanges();
         }
       }
-      
-      // Update table's internal state
-      tableAny.headerCheckboxFocus = allSelected;
     }
     
     // Force table change detection
