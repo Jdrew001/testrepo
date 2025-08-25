@@ -112,13 +112,37 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     const hasSelectableItems = selectableItems.length > 0;
     
     // Disable header checkbox if no selectable items (all items are previously selected)
-    if (headerCheckbox.disabled !== !hasSelectableItems) {
-      headerCheckbox.disabled = !hasSelectableItems;
-      // Also update the native element if it exists
-      if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
-        headerCheckbox.el.nativeElement.disabled = !hasSelectableItems;
+    headerCheckbox.disabled = !hasSelectableItems;
+    
+    // Update the native checkbox element to be visually disabled
+    setTimeout(() => {
+      const checkboxElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox-box');
+      const inputElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox input');
+      
+      if (!hasSelectableItems) {
+        // Apply disabled styling and attributes
+        if (checkboxElement) {
+          checkboxElement.classList.add('p-disabled');
+          checkboxElement.style.opacity = '0.6';
+          checkboxElement.style.cursor = 'not-allowed';
+        }
+        if (inputElement) {
+          inputElement.disabled = true;
+          inputElement.setAttribute('disabled', 'disabled');
+        }
+      } else {
+        // Remove disabled styling and attributes
+        if (checkboxElement) {
+          checkboxElement.classList.remove('p-disabled');
+          checkboxElement.style.opacity = '';
+          checkboxElement.style.cursor = '';
+        }
+        if (inputElement) {
+          inputElement.disabled = false;
+          inputElement.removeAttribute('disabled');
+        }
       }
-    }
+    }, 0);
 
     // Update the checked/indeterminate state only if there are selectable items
     if (hasSelectableItems) {
@@ -137,17 +161,17 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
         headerCheckbox.checked = false;
         (this.table as any).headerCheckboxFocus = false;
         // Set indeterminate state if supported
-        if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
-          headerCheckbox.el.nativeElement.indeterminate = true;
-        }
+        setTimeout(() => {
+          const inputElement = this.table.el.nativeElement.querySelector('.p-datatable-thead .p-checkbox input');
+          if (inputElement) {
+            inputElement.indeterminate = true;
+          }
+        }, 0);
       }
     } else {
       // When all items are previously selected, ensure checkbox appears unchecked and disabled
       headerCheckbox.checked = false;
       (this.table as any).headerCheckboxFocus = false;
-      if (headerCheckbox.el && headerCheckbox.el.nativeElement) {
-        headerCheckbox.el.nativeElement.indeterminate = false;
-      }
     }
   }
 
