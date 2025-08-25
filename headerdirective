@@ -1,22 +1,59 @@
-import { Directive, Host, Input, OnInit, AfterViewInit, ChangeDetectorRef, Optional } from '@angular/core';
+import { Directive, Host, Input, OnInit, AfterViewInit, ChangeDetectorRef, Optional, OnDestroy } from '@angular/core';
 import { Table } from 'primeng/table';
 
 @Directive({
   selector: '[appSelectionFix]'
 })
-export class SelectionFixDirective implements OnInit, AfterViewInit {
+export class SelectionFixDirective implements OnInit, AfterViewInit, OnDestroy {
 
   @Input() previouslySelected: any[] = [];  // Items that were already selected before
-  @Input() headerCheckbox: any;  // Reference to the header checkbox component
   private checkInterval: any;
 
   constructor(@Host() private table: Table, @Optional() private cdr: ChangeDetectorRef) {}
 
   ngOnInit() {
-    // Override PrimeNG's internal toggle method
+    // Store the original toggle method
     const originalToggleRowsWithCheckbox = (this.table as any).toggleRowsWithCheckbox;
+    
+    // Override PrimeNG's internal toggle method
     (this.table as any).toggleRowsWithCheckbox = (event: any, check: boolean) => {
-      this.handleToggleAll(event, check);
+      // Get ALL data across all pages
+      const allData = this.table.filteredValue || this.table.value || [];
+      if (!allData.length) return;
+
+      // Get only selectable items (not previously selected)
+      const selectableItems = allData.filter(item => this.isSelectable(item));
+      
+      if (!selectableItems.length) {
+        // Nothing to select/deselect
+        return;
+      }
+
+      if (check) {
+        // Select all selectable items
+        this.table.selection = [...selectableItems];
+      } else {
+        // Clear selection
+        this.table.selection = [];
+      }
+
+      // Update PrimeNG's internal selection keys
+      this.updateSelectionKeys();
+      
+      // Emit the proper events
+      this.table.onHeaderCheckboxToggle.emit({
+        originalEvent: event,
+        checked: check
+      });
+      
+      if (this.table.selectionChange) {
+        this.table.selectionChange.emit(this.table.selection);
+      }
+      
+      // Update header state
+      setTimeout(() => {
+        this.updateHeaderState();
+      }, 0);
     };
 
     // Override the method that checks if all rows are selected
@@ -24,41 +61,12 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       return this.areAllSelectableItemsSelected();
     };
     
-    // Override updateHeaderCheckboxState to properly sync state
-    (this.table as any).updateHeaderCheckboxState = () => {
-      const allSelected = this.areAllSelectableItemsSelected();
-      
-      // Update the header checkbox using our input reference
-      if (this.headerCheckbox) {
-        this.headerCheckbox.checked = allSelected;
-        // Use PrimeNG checkbox's writeValue to properly update
-        if (this.headerCheckbox.writeValue) {
-          this.headerCheckbox.writeValue(allSelected);
-        }
-        // Emit change event
-        if (this.headerCheckbox.onChange) {
-          this.headerCheckbox.onChange.emit(allSelected);
-        }
-        // Update the model
-        if (this.headerCheckbox.model !== allSelected) {
-          this.headerCheckbox.model = allSelected;
-        }
-        // Trigger change detection
-        if (this.headerCheckbox.cd) {
-          this.headerCheckbox.cd.markForCheck();
-        }
-      }
-      
-      // Then run our custom update
-      this.updateHeaderState();
-    };
-
     // Listen to selection changes
     if (this.table.selectionChange) {
       this.table.selectionChange.subscribe(() => {
         this.cleanSelection();
         setTimeout(() => {
-          (this.table as any).updateHeaderCheckboxState();
+          this.updateHeaderState();
         }, 0);
       });
     }
@@ -82,45 +90,6 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     }
   }
 
-  private handleToggleAll(event: any, check: boolean) {
-    // Get ALL data across all pages
-    const allData = this.table.filteredValue || this.table.value || [];
-    if (!allData.length) return;
-
-    // Get only selectable items (not previously selected)
-    const selectableItems = allData.filter(item => this.isSelectable(item));
-    
-    if (!selectableItems.length) {
-      // Nothing to select/deselect
-      return;
-    }
-
-    if (check) {
-      // Select all selectable items
-      this.table.selection = [...selectableItems];
-    } else {
-      // Clear selection
-      this.table.selection = [];
-    }
-
-    // Update PrimeNG's internal selection keys
-    this.updateSelectionKeys();
-    
-    // Emit events
-    this.table.onHeaderCheckboxToggle.emit({
-      originalEvent: event,
-      checked: check
-    });
-    
-    if (this.table.selectionChange) {
-      this.table.selectionChange.emit(this.table.selection);
-    }
-    
-    // Force update header checkbox state after toggle
-    setTimeout(() => {
-      this.updateHeaderState();
-    }, 0);
-  }
 
   private areAllSelectableItemsSelected(): boolean {
     const allData = this.table.filteredValue || this.table.value || [];
@@ -144,21 +113,19 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
     const selectableItems = allData.filter(item => this.isSelectable(item));
     const hasSelectableItems = selectableItems.length > 0;
     
+    // Access table's internal properties
+    const tableAny = this.table as any;
+    
     if (!hasSelectableItems) {
       // Disable when no selectable items (all are previously selected)
-      if (this.headerCheckbox) {
-        this.headerCheckbox.disabled = true;
-        this.headerCheckbox.checked = false;
-        // Force update the checkbox component
-        if (this.headerCheckbox.writeValue) {
-          this.headerCheckbox.writeValue(false);
-        }
-        if (this.headerCheckbox.cd) {
-          this.headerCheckbox.cd.detectChanges();
-        }
+      tableAny.allRowsSelected = () => false;
+      // Force the header checkbox to be disabled
+      if (tableAny.headerCheckboxDisabled !== true) {
+        tableAny.headerCheckboxDisabled = true;
       }
     } else {
       // Enable when there are selectable items
+      tableAny.headerCheckboxDisabled = false;
       
       // Check how many selectable items are selected
       const selectedCount = selectableItems.filter(item =>
@@ -167,35 +134,18 @@ export class SelectionFixDirective implements OnInit, AfterViewInit {
       
       const allSelected = selectedCount === selectableItems.length && selectedCount > 0;
       
-      if (this.headerCheckbox) {
-        this.headerCheckbox.disabled = false;
-        this.headerCheckbox.checked = allSelected;
-        
-        // Force update the checkbox component with the correct value
-        if (this.headerCheckbox.writeValue) {
-          this.headerCheckbox.writeValue(allSelected);
-        }
-        
-        // Handle model update
-        if (this.headerCheckbox.model !== allSelected) {
-          this.headerCheckbox.model = allSelected;
-        }
-        
-        // Emit change event if needed
-        if (this.headerCheckbox.onChange && this.headerCheckbox.onChange.observers?.length > 0) {
-          this.headerCheckbox.onChange.emit(allSelected);
-        }
-        
-        // Force Angular change detection on the checkbox
-        if (this.headerCheckbox.cd) {
-          this.headerCheckbox.cd.detectChanges();
-        }
-      }
+      // Update the internal state to reflect selection
+      tableAny.allRowsSelected = () => allSelected;
     }
     
     // Force table change detection
     if (this.cdr) {
       this.cdr.detectChanges();
+    }
+    
+    // Trigger PrimeNG's internal header checkbox update
+    if (tableAny.updateHeaderCheckboxState) {
+      tableAny.updateHeaderCheckboxState();
     }
   }
 
