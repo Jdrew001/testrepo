@@ -19,10 +19,15 @@ prompt_input() {
     local user_input
 
     if [ -n "$default_value" ]; then
-        echo -ne "${CYAN}$prompt_text [$default_value]: ${NC}"
+        printf "${CYAN}%s [%s]: ${NC}" "$prompt_text" "$default_value"
     else
-        echo -ne "${CYAN}$prompt_text: ${NC}"
+        printf "${CYAN}%s: ${NC}" "$prompt_text"
     fi
+
+    # Force flush to ensure prompt is displayed
+    exec 3>&1
+    exec 1>&3
+    exec 3>&-
 
     read user_input
 
@@ -203,8 +208,38 @@ echo -e "${GREEN}   Bitbucket → GitHub (Batch Mode)${NC}"
 echo -e "${GREEN}════════════════════════════════════════${NC}"
 echo ""
 
+# Get target directory
+echo -e "${YELLOW}Step 1: Repository Directory${NC}"
+echo -e "${BLUE}Enter the path to the Git repository you want to migrate${NC}"
+REPO_DIR=$(prompt_input "Repository directory path" "$(pwd)")
+
+# Expand tilde to home directory if present
+REPO_DIR="${REPO_DIR/#\~/$HOME}"
+
+# Check if directory exists
+if [ ! -d "$REPO_DIR" ]; then
+    echo -e "${RED}✗ Directory does not exist: $REPO_DIR${NC}"
+    exit 1
+fi
+
+# Check if it's a git repository
+if [ ! -d "$REPO_DIR/.git" ]; then
+    echo -e "${RED}✗ Not a Git repository: $REPO_DIR${NC}"
+    echo -e "${YELLOW}Please provide a path to a valid Git repository${NC}"
+    exit 1
+fi
+
+# Change to the repository directory
+cd "$REPO_DIR" || exit 1
+echo -e "${GREEN}✓ Changed to repository: $REPO_DIR${NC}"
+
+# Show current repository info
+CURRENT_REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+echo -e "${BLUE}  Repository: $CURRENT_REPO${NC}"
+echo ""
+
 # Get source remote (Bitbucket)
-echo -e "${YELLOW}Step 1: Source Repository (Bitbucket)${NC}"
+echo -e "${YELLOW}Step 2: Source Repository (Bitbucket)${NC}"
 SOURCE_REMOTE=$(prompt_input "Enter Bitbucket remote name" "origin")
 
 # Validate source remote
@@ -221,7 +256,7 @@ echo -e "${BLUE}  URL: $SOURCE_URL${NC}"
 echo ""
 
 # Get target remote (GitHub)
-echo -e "${YELLOW}Step 2: Target Repository (GitHub)${NC}"
+echo -e "${YELLOW}Step 3: Target Repository (GitHub)${NC}"
 TARGET_REMOTE=$(prompt_input "Enter GitHub remote name or URL" "github")
 
 # Validate or add target remote
@@ -248,19 +283,19 @@ fi
 echo ""
 
 # Get branch patterns
-echo -e "${YELLOW}Step 3: Branch Selection${NC}"
+echo -e "${YELLOW}Step 4: Branch Selection${NC}"
 echo -e "${BLUE}Enter branch patterns to migrate (comma-separated)${NC}"
 echo -e "${BLUE}Examples: release/*, hotfix/*, feature/*, develop, main${NC}"
 BRANCH_PATTERNS=$(prompt_input "Branch patterns" "release/*,hotfix/*,feature/*")
 echo ""
 
 # Get date filter
-echo -e "${YELLOW}Step 4: Date Filter${NC}"
+echo -e "${YELLOW}Step 5: Date Filter${NC}"
 DAYS_BACK=$(prompt_input "Include branches active in last N days (0 for all)" "30")
 echo ""
 
 # Get batch size
-echo -e "${YELLOW}Step 5: Batch Configuration${NC}"
+echo -e "${YELLOW}Step 6: Batch Configuration${NC}"
 echo -e "${BLUE}Recommended batch sizes:${NC}"
 echo -e "  • Large files in repo: 10-25 commits"
 echo -e "  • Medium files: 25-50 commits"
