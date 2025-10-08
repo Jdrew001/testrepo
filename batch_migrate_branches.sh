@@ -210,17 +210,43 @@ echo ""
 
 # Get target directory
 echo -e "${YELLOW}Step 1: Repository Directory${NC}"
-echo -e "${BLUE}Enter the path to the Git repository you want to migrate${NC}"
-REPO_DIR=$(prompt_input "Repository directory path" "$(pwd)")
+echo -e "${BLUE}Enter the repository folder name or path${NC}"
+echo -e "${BLUE}(For folders in the parent directory, just enter the folder name)${NC}"
+REPO_DIR=$(prompt_input "Repository directory" ".")
+
+# Save the starting directory and get script location
+STARTING_DIR=$(pwd)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PARENT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Expand tilde to home directory if present
 REPO_DIR="${REPO_DIR/#\~/$HOME}"
 
-# Check if directory exists
-if [ ! -d "$REPO_DIR" ]; then
-    echo -e "${RED}✗ Directory does not exist: $REPO_DIR${NC}"
+# Check different possible locations
+if [ -d "$REPO_DIR" ]; then
+    # Path exists as given (absolute or relative from current dir)
+    FINAL_DIR="$REPO_DIR"
+elif [ -d "$PARENT_DIR/$REPO_DIR" ]; then
+    # Check in parent directory (where projects likely are)
+    FINAL_DIR="$PARENT_DIR/$REPO_DIR"
+elif [ -d "$SCRIPT_DIR/$REPO_DIR" ]; then
+    # Check in same directory as script
+    FINAL_DIR="$SCRIPT_DIR/$REPO_DIR"
+elif [ -d "../$REPO_DIR" ]; then
+    # Check one level up from current directory
+    FINAL_DIR="../$REPO_DIR"
+else
+    echo -e "${RED}✗ Directory not found: $REPO_DIR${NC}"
+    echo -e "${YELLOW}Searched in:${NC}"
+    echo -e "  • Current directory: $(pwd)/$REPO_DIR"
+    echo -e "  • Parent of scripts: $PARENT_DIR/$REPO_DIR"
+    echo -e "  • Script directory: $SCRIPT_DIR/$REPO_DIR"
+    echo -e "  • Parent of current: ../$REPO_DIR"
     exit 1
 fi
+
+# Use the found directory
+REPO_DIR="$FINAL_DIR"
 
 # Check if it's a git repository
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -228,9 +254,6 @@ if [ ! -d "$REPO_DIR/.git" ]; then
     echo -e "${YELLOW}Please provide a path to a valid Git repository${NC}"
     exit 1
 fi
-
-# Save the starting directory
-STARTING_DIR=$(pwd)
 
 # Change to the repository directory
 cd "$REPO_DIR" || exit 1
