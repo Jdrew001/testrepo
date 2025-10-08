@@ -216,32 +216,69 @@ REPO_DIR=$(prompt_input "Repository directory" ".")
 
 # Save the starting directory and get script location
 STARTING_DIR=$(pwd)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PARENT_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT_REAL_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SCRIPT_REAL_PATH")"
+PARENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Debug output
+echo -e "${CYAN}Debug info:${NC}"
+echo -e "  • Current directory: $(pwd)"
+echo -e "  • Script directory: $SCRIPT_DIR"
+echo -e "  • Parent directory: $PARENT_DIR"
+echo -e "  • Input: '$REPO_DIR'"
+echo ""
 
 # Expand tilde to home directory if present
 REPO_DIR="${REPO_DIR/#\~/$HOME}"
 
+# Remove any trailing slashes
+REPO_DIR="${REPO_DIR%/}"
+
 # Check different possible locations
-if [ -d "$REPO_DIR" ]; then
-    # Path exists as given (absolute or relative from current dir)
-    FINAL_DIR="$REPO_DIR"
+FINAL_DIR=""
+
+# First check if it's an absolute path
+if [[ "$REPO_DIR" = /* ]]; then
+    if [ -d "$REPO_DIR" ]; then
+        FINAL_DIR="$REPO_DIR"
+        echo -e "${GREEN}✓ Found as absolute path${NC}"
+    fi
+# Check if it's the current directory
+elif [ "$REPO_DIR" = "." ] || [ "$REPO_DIR" = "./" ]; then
+    FINAL_DIR="$(pwd)"
+    echo -e "${GREEN}✓ Using current directory${NC}"
+# Check relative to current directory
+elif [ -d "$(pwd)/$REPO_DIR" ]; then
+    FINAL_DIR="$(pwd)/$REPO_DIR"
+    echo -e "${GREEN}✓ Found in current directory${NC}"
+# Check in parent directory (where projects likely are)
 elif [ -d "$PARENT_DIR/$REPO_DIR" ]; then
-    # Check in parent directory (where projects likely are)
     FINAL_DIR="$PARENT_DIR/$REPO_DIR"
+    echo -e "${GREEN}✓ Found in parent directory of scripts${NC}"
+# Check in script directory
 elif [ -d "$SCRIPT_DIR/$REPO_DIR" ]; then
-    # Check in same directory as script
     FINAL_DIR="$SCRIPT_DIR/$REPO_DIR"
+    echo -e "${GREEN}✓ Found in script directory${NC}"
+# Check one level up from current
 elif [ -d "../$REPO_DIR" ]; then
-    # Check one level up from current directory
-    FINAL_DIR="../$REPO_DIR"
-else
+    FINAL_DIR="$(cd "../$REPO_DIR" && pwd)"
+    echo -e "${GREEN}✓ Found in parent of current directory${NC}"
+fi
+
+# If not found, show detailed error
+if [ -z "$FINAL_DIR" ]; then
     echo -e "${RED}✗ Directory not found: $REPO_DIR${NC}"
     echo -e "${YELLOW}Searched in:${NC}"
-    echo -e "  • Current directory: $(pwd)/$REPO_DIR"
-    echo -e "  • Parent of scripts: $PARENT_DIR/$REPO_DIR"
-    echo -e "  • Script directory: $SCRIPT_DIR/$REPO_DIR"
-    echo -e "  • Parent of current: ../$REPO_DIR"
+    echo -e "  • As absolute path: $REPO_DIR"
+    echo -e "  • In current dir: $(pwd)/$REPO_DIR"
+    echo -e "  • In parent of scripts: $PARENT_DIR/$REPO_DIR"
+    echo -e "  • In script dir: $SCRIPT_DIR/$REPO_DIR"
+    echo -e "  • In parent of current: ../REPO_DIR"
+    echo ""
+    echo -e "${YELLOW}Available directories in $PARENT_DIR:${NC}"
+    ls -d "$PARENT_DIR"/*/ 2>/dev/null | head -10 | while read dir; do
+        echo -e "  • $(basename "$dir")"
+    done
     exit 1
 fi
 
