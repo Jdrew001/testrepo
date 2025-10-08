@@ -229,9 +229,29 @@ if [ ! -d "$REPO_DIR/.git" ]; then
     exit 1
 fi
 
+# Save the starting directory
+STARTING_DIR=$(pwd)
+
 # Change to the repository directory
 cd "$REPO_DIR" || exit 1
-echo -e "${GREEN}✓ Changed to repository: $REPO_DIR${NC}"
+
+# Get relative path for display
+if [[ "$REPO_DIR" == /* ]]; then
+    # It's an absolute path, try to make it relative
+    DISPLAY_PATH=$(realpath --relative-to="$STARTING_DIR" "$REPO_DIR" 2>/dev/null || echo "$REPO_DIR")
+else
+    # It's already relative
+    DISPLAY_PATH="$REPO_DIR"
+fi
+
+# Make the display path more user-friendly
+if [ "$DISPLAY_PATH" = "." ]; then
+    DISPLAY_PATH="current directory"
+elif [ "$DISPLAY_PATH" = ".." ]; then
+    DISPLAY_PATH="parent directory"
+fi
+
+echo -e "${GREEN}✓ Changed to repository: $DISPLAY_PATH${NC}"
 
 # Show current repository info
 CURRENT_REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
