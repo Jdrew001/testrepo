@@ -1,129 +1,46 @@
-import { 
-  Directive, 
-  Optional, 
-  OnInit, 
-  OnDestroy, 
-  AfterViewInit,
-  DoCheck
-} from '@angular/core';
-import { NgModel } from '@angular/forms';
+import { Directive, Host, OnInit } from '@angular/core';
 import { MultiSelect } from 'primeng/multiselect';
-import { Subject, takeUntil } from 'rxjs';
+import { ObjectUtils } from 'primeng/utils';
 
 @Directive({
-  selector: 'p-multiSelect[dataKey][ngModel]',
-  standalone: true
+    selector: 'p-multiSelect[dataKey]'  // Only applies when dataKey is used
 })
-export class MultiSelectDeepCompareDirective implements OnInit, AfterViewInit, OnDestroy, DoCheck {
-  private destroy$ = new Subject<void>();
-  private isNormalizing = false;
-  private lastOptionsLength = 0;
-  private initialNormalizationDone = false;
-
-  constructor(
-    @Optional() private multiSelect: MultiSelect,
-    @Optional() private ngModel: NgModel
-  ) {}
-
-  ngOnInit() {
-    if (!this.multiSelect || !this.ngModel) {
-      return;
-    }
-
-    // Watch for value changes
-    this.ngModel.valueChanges
-      ?.pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        if (!this.isNormalizing) {
-          setTimeout(() => this.normalizeSelection(), 0);
-        }
-      });
-  }
-
-  ngAfterViewInit() {
-    // Initial normalization after view init
-    setTimeout(() => {
-      this.normalizeSelection();
-      this.initialNormalizationDone = true;
-    }, 0);
-  }
-
-  ngDoCheck() {
-    // Check if options have been loaded or changed
-    const currentOptionsLength = this.multiSelect?. options?.length || 0;
+export class MultiSelectDataKeyFixDirective implements OnInit {
     
-    if (currentOptionsLength !== this.lastOptionsLength) {
-      this.lastOptionsLength = currentOptionsLength;
-      
-      if (currentOptionsLength > 0) {
-        setTimeout(() => this.normalizeSelection(), 0);
-      }
-    }
-  }
-
-  private normalizeSelection() {
-    if (!this.multiSelect?.dataKey || !this. ngModel) {
-      return;
-    }
-
-    const options = this.multiSelect.options;
-    const currentValue = this.ngModel.value;
-
-    if (! options || options.length === 0) {
-      return;
-    }
-
-    if (! Array.isArray(currentValue) || currentValue.length === 0) {
-      return;
-    }
-
-    this.isNormalizing = true;
-
-    const dataKey = this.multiSelect.dataKey;
-    const normalizedValue:  any[] = [];
-
-    // Create a map for faster lookup
-    const optionsMap = new Map(
-      options.map(option => [option[dataKey], option])
-    );
-
-    // Match selected items with options
-    for (const selectedItem of currentValue) {
-      if (!selectedItem) continue;
-
-      const dataKeyValue = selectedItem[dataKey];
-      const matchedOption = optionsMap.get(dataKeyValue);
-
-      if (matchedOption) {
-        normalizedValue.push(matchedOption);
-      }
-    }
-
-    // Only update if we found matches
-    if (normalizedValue.length > 0) {
-      const hasChanges = normalizedValue. some(
-        (item, index) => item !== currentValue[index]
-      );
-
-      if (hasChanges || !this.initialNormalizationDone) {
-        // Update NgModel
-        this.ngModel.control. setValue(normalizedValue, { emitEvent: false });
-
-        // Trigger change detection on MultiSelect
-        this.multiSelect.value = normalizedValue;
+    constructor(@Host() private multiSelect: MultiSelect) {}
+    
+    ngOnInit() {
+        // Store original method
+        const originalIsSelected = this.multiSelect.isSelected. bind(this.multiSelect);
         
-        // Use ChangeDetectorRef if available
-        if (this.multiSelect.cd) {
-          this.multiSelect.cd.detectChanges();
-        }
-      }
+        // Override with v16 behavior
+        this.multiSelect.isSelected = (option: any): boolean => {
+            const optionValue = this.multiSelect.getOptionValue(option);
+            const modelValue = this.multiSelect.modelValue();
+            const equalityKey = this.getEqualityKey();
+            
+            if (! modelValue || modelValue.length === 0) {
+                return false;
+            }
+            
+            return modelValue.some((value: any) => {
+                // v16 behavior: When dataKey is set without optionValue,
+                // compare objects by the dataKey field
+                if (equalityKey && !this.multiSelect.optionValue) {
+                    // Both are objects - compare by dataKey
+                    if (typeof value === 'object' && value !== null && 
+                        typeof optionValue === 'object' && optionValue !== null) {
+                        return value[equalityKey] === optionValue[equalityKey];
+                    }
+                }
+                
+                // Fall back to ObjectUtils.equals for other cases
+                return ObjectUtils.equals(value, optionValue, equalityKey);
+            });
+        };
     }
-
-    this. isNormalizing = false;
-  }
-
-  ngOnDestroy() {
-    this.destroy$. next();
-    this.destroy$. complete();
-  }
+    
+    private getEqualityKey(): string | null {
+        return this.multiSelect.optionValue ? null : this.multiSelect.dataKey;
+    }
 }
