@@ -1,16 +1,24 @@
-import { Directive, Input, Optional, OnInit, OnDestroy, AfterViewInit } from '@angular/core';
+import { 
+  Directive, 
+  Optional, 
+  OnInit, 
+  OnDestroy, 
+  AfterViewInit,
+  DoCheck
+} from '@angular/core';
 import { NgModel } from '@angular/forms';
 import { MultiSelect } from 'primeng/multiselect';
-import { Subject, takeUntil, debounceTime } from 'rxjs';
+import { Subject, takeUntil } from 'rxjs';
 
 @Directive({
   selector: 'p-multiSelect[dataKey][ngModel]',
-  standalone: true // Remove this if not using standalone components
+  standalone: true
 })
-export class MultiSelectDeepCompareDirective implements OnInit, AfterViewInit, OnDestroy {
+export class MultiSelectDeepCompareDirective implements OnInit, AfterViewInit, OnDestroy, DoCheck {
   private destroy$ = new Subject<void>();
   private isNormalizing = false;
-  private pendingValue: any[] | null = null;
+  private lastOptionsLength = 0;
+  private initialNormalizationDone = false;
 
   constructor(
     @Optional() private multiSelect: MultiSelect,
@@ -18,19 +26,13 @@ export class MultiSelectDeepCompareDirective implements OnInit, AfterViewInit, O
   ) {}
 
   ngOnInit() {
-    if (!this.multiSelect || !this. ngModel) {
+    if (!this.multiSelect || !this.ngModel) {
       return;
     }
 
-    // Store the initial value
-    this.pendingValue = this.ngModel. value;
-
-    // Watch for value changes from outside (programmatic changes)
+    // Watch for value changes
     this.ngModel.valueChanges
-      ?. pipe(
-        takeUntil(this.destroy$),
-        debounceTime(0)
-      )
+      ?.pipe(takeUntil(this.destroy$))
       .subscribe(() => {
         if (!this.isNormalizing) {
           setTimeout(() => this.normalizeSelection(), 0);
@@ -39,82 +41,89 @@ export class MultiSelectDeepCompareDirective implements OnInit, AfterViewInit, O
   }
 
   ngAfterViewInit() {
-    // Normalize after view is initialized and options are likely loaded
+    // Initial normalization after view init
     setTimeout(() => {
       this.normalizeSelection();
-      this.watchForOptionsChanges();
+      this.initialNormalizationDone = true;
     }, 0);
   }
 
-  private watchForOptionsChanges() {
-    // Watch for options being set or changed
-    let lastOptions = this.multiSelect?. options;
+  ngDoCheck() {
+    // Check if options have been loaded or changed
+    const currentOptionsLength = this.multiSelect?. options?.length || 0;
     
-    const checkInterval = setInterval(() => {
-      if (this.multiSelect?.options && this.multiSelect. options !== lastOptions) {
-        lastOptions = this.multiSelect.options;
-        this.normalizeSelection();
+    if (currentOptionsLength !== this.lastOptionsLength) {
+      this.lastOptionsLength = currentOptionsLength;
+      
+      if (currentOptionsLength > 0) {
+        setTimeout(() => this.normalizeSelection(), 0);
       }
-    }, 100);
-
-    // Clean up after 5 seconds (options should be loaded by then)
-    setTimeout(() => clearInterval(checkInterval), 5000);
+    }
   }
 
   private normalizeSelection() {
-    if (!this.multiSelect?.dataKey || !this.multiSelect?.options) {
+    if (!this.multiSelect?.dataKey || !this. ngModel) {
       return;
     }
 
-    const currentValue = this. pendingValue || this.ngModel.value;
-    this.pendingValue = null;
+    const options = this.multiSelect.options;
+    const currentValue = this.ngModel.value;
+
+    if (! options || options.length === 0) {
+      return;
+    }
 
     if (! Array.isArray(currentValue) || currentValue.length === 0) {
-      return;
-    }
-
-    // Check if options are actually loaded
-    if (! this.multiSelect.options || this.multiSelect.options.length === 0) {
-      this.pendingValue = currentValue;
       return;
     }
 
     this.isNormalizing = true;
 
     const dataKey = this.multiSelect.dataKey;
+    const normalizedValue:  any[] = [];
 
-    // Map selected items to matching references from options
-    const normalizedValue = currentValue
-      .map(selectedItem => {
-        if (! selectedItem) return null;
+    // Create a map for faster lookup
+    const optionsMap = new Map(
+      options.map(option => [option[dataKey], option])
+    );
 
-        const dataKeyValue = selectedItem[dataKey];
+    // Match selected items with options
+    for (const selectedItem of currentValue) {
+      if (!selectedItem) continue;
 
-        const matchedOption = this.multiSelect.options! .find(
-          option => option[dataKey] === dataKeyValue
-        );
+      const dataKeyValue = selectedItem[dataKey];
+      const matchedOption = optionsMap.get(dataKeyValue);
 
-        return matchedOption || selectedItem; // Keep original if not found
-      })
-      .filter(item => item !== null);
-
-    // Update the model and the MultiSelect component
-    if (normalizedValue.length > 0) {
-      this.ngModel.control.setValue(normalizedValue, { emitEvent: false });
-      
-      // Also update the MultiSelect's internal value
-      if (this.multiSelect.value !== normalizedValue) {
-        this.multiSelect.value = normalizedValue;
-        this.multiSelect.updateLabel();
-        this.multiSelect.cd?. markForCheck();
+      if (matchedOption) {
+        normalizedValue.push(matchedOption);
       }
     }
 
-    this.isNormalizing = false;
+    // Only update if we found matches
+    if (normalizedValue.length > 0) {
+      const hasChanges = normalizedValue. some(
+        (item, index) => item !== currentValue[index]
+      );
+
+      if (hasChanges || !this.initialNormalizationDone) {
+        // Update NgModel
+        this.ngModel.control. setValue(normalizedValue, { emitEvent: false });
+
+        // Trigger change detection on MultiSelect
+        this.multiSelect.value = normalizedValue;
+        
+        // Use ChangeDetectorRef if available
+        if (this.multiSelect.cd) {
+          this.multiSelect.cd.detectChanges();
+        }
+      }
+    }
+
+    this. isNormalizing = false;
   }
 
   ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroy$. next();
+    this.destroy$. complete();
   }
 }
