@@ -63,6 +63,41 @@ export function commandLine(command) {
   console.log(`${label("run", "cyan")} ${color.dim(command)}`);
 }
 
+export function loadingIndicator(message) {
+  if (!process.stdout.isTTY) {
+    info(`${message}...`);
+    return {
+      stop() {}
+    };
+  }
+
+  const frames = ["-", "\\", "|", "/"];
+  let frameIndex = 0;
+  let lastWidth = 0;
+
+  const render = () => {
+    const text = `${color.cyan(frames[frameIndex])} ${message}...`;
+    frameIndex = (frameIndex + 1) % frames.length;
+    lastWidth = visibleLength(text);
+    process.stdout.write(`\r${text}`);
+  };
+
+  const clear = () => {
+    process.stdout.write(`\r${" ".repeat(lastWidth)}\r`);
+  };
+
+  render();
+  const timer = setInterval(render, 120);
+  timer.unref?.();
+
+  return {
+    stop() {
+      clearInterval(timer);
+      clear();
+    }
+  };
+}
+
 export function projectHeading(project, detail = "") {
   section(projectLabel(project.name), detail);
 }

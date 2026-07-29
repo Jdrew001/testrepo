@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { commandLine, outputPrefix } from "./terminal.mjs";
+import { commandLine, loadingIndicator, outputPrefix } from "./terminal.mjs";
 
 export function run(command, args, cwd, options = {}) {
   return new Promise((resolve, reject) => {
@@ -7,15 +7,31 @@ export function run(command, args, cwd, options = {}) {
       commandLine([command, ...args.map((arg) => redact(arg, options.redact))].join(" "));
     }
 
+    let loader = options.loadingMessage ? loadingIndicator(options.loadingMessage) : null;
+    const stopLoader = () => {
+      loader?.stop();
+      loader = null;
+    };
+
     const child = spawn(command, args, {
       cwd,
       stdio: ["inherit", "pipe", "pipe"]
     });
 
-    child.stdout.on("data", (chunk) => process.stdout.write(redact(String(chunk), options.redact)));
-    child.stderr.on("data", (chunk) => process.stderr.write(redact(String(chunk), options.redact)));
-    child.on("error", reject);
+    child.stdout.on("data", (chunk) => {
+      stopLoader();
+      process.stdout.write(redact(String(chunk), options.redact));
+    });
+    child.stderr.on("data", (chunk) => {
+      stopLoader();
+      process.stderr.write(redact(String(chunk), options.redact));
+    });
+    child.on("error", (error) => {
+      stopLoader();
+      reject(error);
+    });
     child.on("close", (code) => {
+      stopLoader();
       code === 0
         ? resolve()
         : reject(new Error(`${command} exited with code ${code}`));

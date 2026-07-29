@@ -48,7 +48,10 @@ export async function cloneProjects(config, projects, options) {
 
     fs.mkdirSync(path.dirname(targetDir), { recursive: true });
     projectHeading(project, `clone into ${path.relative(rootDir, targetDir)}`);
-    await run("git", ["clone", cloneUrl, targetDir], rootDir, { redact: token });
+    await run("git", ["clone", "--verbose", "--progress", cloneUrl, targetDir], rootDir, {
+      loadingMessage: `Cloning ${project.name}`,
+      redact: token
+    });
 
     info("Resetting origin URL without credentials");
     await run("git", ["remote", "set-url", "origin", cleanUrl], targetDir);
