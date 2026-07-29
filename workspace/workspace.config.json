@@ -1,0 +1,51 @@
+{
+  "projectsDir": "projects",
+  "defaultGroup": "compliance-testing",
+  "projects": [
+    {
+      "name": "compliance-base",
+      "repo": "github.com/YOUR_ORG/compliance-base.git",
+      "path": "compliance-testing/base-app",
+      "branch": "main",
+      "groups": ["compliance-testing", "all-ui"],
+      "install": "npm install",
+      "start": "npm run start:host"
+    },
+    {
+      "name": "compliance-mfe-one",
+      "repo": "github.com/YOUR_ORG/compliance-mfe-one.git",
+      "path": "compliance-testing/mfe-one",
+      "branch": "main",
+      "groups": ["compliance-testing", "all-ui"],
+      "install": "npm install",
+      "start": "npm run start:host"
+    },
+    {
+      "name": "compliance-mfe-two",
+      "repo": "github.com/YOUR_ORG/compliance-mfe-two.git",
+      "path": "compliance-testing/mfe-two",
+      "branch": "main",
+      "groups": ["compliance-testing", "all-ui"],
+      "install": "npm install",
+      "start": "npm run start:host"
+    },
+    {
+      "name": "compliance-mfe-three",
+      "repo": "github.com/YOUR_ORG/compliance-mfe-three.git",
+      "path": "compliance-testing/mfe-three",
+      "branch": "main",
+      "groups": ["compliance-testing", "all-ui"],
+      "install": "npm install",
+      "start": "npm run start:host"
+    },
+    {
+      "name": "compliance-mfe-four",
+      "repo": "github.com/YOUR_ORG/compliance-mfe-four.git",
+      "path": "compliance-testing/mfe-four",
+      "branch": "main",
+      "groups": ["compliance-testing", "all-ui"],
+      "install": "npm install",
+      "start": "npm run start:host"
+    }
+  ]
+}

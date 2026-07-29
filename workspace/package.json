@@ -1,0 +1,16 @@
+{
+  "name": "dept-ui-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bootstrap": "node tools/bootstrap.mjs",
+    "clone": "node tools/clone.mjs",
+    "install:all": "node tools/install.mjs",
+    "update": "node tools/update.mjs",
+    "start": "node tools/start.mjs",
+    "status": "node tools/status.mjs",
+    "list": "node tools/list.mjs",
+    "help": "node tools/help.mjs"
+  }
+}

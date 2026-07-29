@@ -1,0 +1,7 @@
+node_modules/
+
+# Child projects are cloned here and keep their own Git repos.
+projects/*
+!projects/.gitkeep
+
+.DS_Store
