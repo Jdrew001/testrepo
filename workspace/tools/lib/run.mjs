@@ -20,11 +20,11 @@ export function run(command, args, cwd, options = {}) {
 
     child.stdout.on("data", (chunk) => {
       stopLoader();
-      process.stdout.write(redact(String(chunk), options.redact));
+      writeOutput(chunk, process.stdout, options);
     });
     child.stderr.on("data", (chunk) => {
       stopLoader();
-      process.stderr.write(redact(String(chunk), options.redact));
+      writeOutput(chunk, process.stderr, options);
     });
     child.on("error", (error) => {
       stopLoader();
@@ -103,12 +103,22 @@ export function capture(command, args, cwd) {
 }
 
 function writePrefixed(name, chunk, stream) {
-  const lines = String(chunk).split(/\r?\n/);
+  const lines = String(chunk).split(/\r?\n|\r/);
 
   for (const line of lines) {
     if (line.length > 0) {
       stream.write(`${outputPrefix(name)} ${line}\n`);
     }
+  }
+}
+
+function writeOutput(chunk, stream, options) {
+  const value = redact(String(chunk), options.redact);
+
+  if (options.name) {
+    writePrefixed(options.name, value, stream);
+  } else {
+    stream.write(value);
   }
 }
 

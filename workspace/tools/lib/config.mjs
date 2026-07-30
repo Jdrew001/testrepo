@@ -13,7 +13,7 @@ export function loadSelection(argv = process.argv.slice(2)) {
   const projects = selectProjects(config, options);
 
   if (projects.length === 0) {
-    throw new Error("No matching projects found.");
+    throw new Error("No projects selected. Use --group <name>, --project <name>, or --all.");
   }
 
   return { config, options, projects };
@@ -31,6 +31,9 @@ export function readConfig() {
   }
 
   return {
+    commands: config.commands ?? {},
+    defaultCommand: config.defaultCommand ?? "",
+    defaultConcurrency: config.defaultConcurrency ?? null,
     projectsDir: config.projectsDir ?? "projects",
     defaultGroup: config.defaultGroup,
     projects: config.projects
@@ -40,6 +43,8 @@ export function readConfig() {
 export function parseProjectArgs(argv) {
   const options = {
     all: false,
+    command: "",
+    concurrency: null,
     groups: [],
     projects: [],
     soeid: process.env.GIT_SOEID || "",
@@ -59,6 +64,14 @@ export function parseProjectArgs(argv) {
       options.projects.push(requireValue(argv, ++i, arg));
     } else if (arg.startsWith("--project=")) {
       options.projects.push(arg.slice("--project=".length));
+    } else if (arg === "--command" || arg === "-c") {
+      options.command = requireValue(argv, ++i, arg);
+    } else if (arg.startsWith("--command=")) {
+      options.command = arg.slice("--command=".length);
+    } else if (arg === "--concurrency") {
+      options.concurrency = parseConcurrency(requireValue(argv, ++i, arg), arg);
+    } else if (arg.startsWith("--concurrency=")) {
+      options.concurrency = parseConcurrency(arg.slice("--concurrency=".length), "--concurrency");
     } else if (arg === "--soeid") {
       options.soeid = requireValue(argv, ++i, arg);
     } else if (arg.startsWith("--soeid=")) {
@@ -71,7 +84,7 @@ export function parseProjectArgs(argv) {
   return options;
 }
 
-export function selectProjects(config, options) {
+export function selectProjects(config, options, selectionOptions = {}) {
   if (options.all) {
     return config.projects;
   }
@@ -83,12 +96,16 @@ export function selectProjects(config, options) {
 
   const groups = options.groups.length > 0
     ? options.groups
-    : config.defaultGroup
+    : config.defaultGroup && selectionOptions.useDefaultGroup !== false
       ? [config.defaultGroup]
       : [];
 
-  if (groups.length === 0 || groups.includes("all")) {
+  if (groups.includes("all")) {
     return config.projects;
+  }
+
+  if (groups.length === 0) {
+    return selectionOptions.defaultToAll ? config.projects : [];
   }
 
   const wanted = new Set(groups);
@@ -123,4 +140,14 @@ function requireValue(args, index, flag) {
   }
 
   return value;
+}
+
+function parseConcurrency(value, flag) {
+  const concurrency = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error(`${flag} requires a positive integer.`);
+  }
+
+  return concurrency;
 }

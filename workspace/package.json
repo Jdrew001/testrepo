@@ -8,6 +8,7 @@
     "clone": "node tools/clone.mjs",
     "install:all": "node tools/install.mjs",
     "update": "node tools/update.mjs",
+    "run": "node tools/run.mjs",
     "start": "node tools/start.mjs",
     "status": "node tools/status.mjs",
     "list": "node tools/list.mjs",

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { projectCommand, runnableProjects } from "./lib/commands.mjs";
 import { loadSelection, projectDir, requireProjectDir } from "./lib/config.mjs";
 import { isDirectRun, runMain } from "./lib/main.mjs";
 import { spawnShell, waitForExit } from "./lib/run.mjs";
@@ -11,11 +12,11 @@ export async function startSelected(argv = process.argv.slice(2)) {
   await startProjects(config, projects);
 }
 
-export async function startProjects(config, projects) {
-  const runnable = projects.filter((project) => project.start);
+export async function startProjects(config, projects, commandName = "start") {
+  const runnable = runnableProjects(projects, commandName);
 
   if (runnable.length === 0) {
-    throw new Error("No selected projects define a start command.");
+    throw new Error(`No selected projects define a ${commandName} command.`);
   }
 
   info("Press Ctrl-C once to stop every started project.");
@@ -26,8 +27,9 @@ export async function startProjects(config, projects) {
 
   const children = runnable.map((project) => {
     const cwd = projectDir(config, project);
-    projectHeading(project, project.start);
-    return spawnShell(project.start, cwd, project.name);
+    const command = projectCommand(project, commandName);
+    projectHeading(project, command);
+    return spawnShell(command, cwd, project.name);
   });
 
   const stop = () => {

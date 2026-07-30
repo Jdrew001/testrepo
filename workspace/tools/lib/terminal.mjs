@@ -39,6 +39,35 @@ export function section(title, detail = "") {
   console.log(`${color.bold(title)}${suffix}`);
 }
 
+export function panel(title, rows) {
+  const entries = rows
+    .filter((row) => row.value !== "" && row.value !== null && row.value !== undefined)
+    .map((row) => ({
+      label: String(row.label),
+      value: String(row.value)
+    }));
+  const labelWidth = entries.reduce((max, row) => Math.max(max, visibleLength(row.label)), 0);
+  const rowLines = entries.map((row) =>
+    `${color.dim(row.label.padEnd(labelWidth))}  ${row.value}`
+  );
+  const width = Math.max(
+    visibleLength(title),
+    ...rowLines.map((line) => visibleLength(line)),
+    36
+  );
+
+  console.log("");
+  console.log(color.cyan(`+${"-".repeat(width + 2)}+`));
+  console.log(`${color.cyan("|")} ${color.bold(title)}${" ".repeat(width - visibleLength(title))} ${color.cyan("|")}`);
+  console.log(color.cyan(`+${"-".repeat(width + 2)}+`));
+
+  for (const line of rowLines) {
+    console.log(`${color.cyan("|")} ${line}${" ".repeat(width - visibleLength(line))} ${color.cyan("|")}`);
+  }
+
+  console.log(color.cyan(`+${"-".repeat(width + 2)}+`));
+}
+
 export function info(message) {
   console.log(`${label("info", "blue")} ${message}`);
 }
@@ -111,8 +140,12 @@ export function outputPrefix(name) {
 }
 
 export function statusLabel(state) {
-  if (state === "clean" || state === "cloned" || state === "installed" || state === "updated") {
+  if (state === "clean" || state === "cloned" || state === "installed" || state === "updated" || state === "done") {
     return label(state, "green");
+  }
+
+  if (state === "failed") {
+    return label(state, "red");
   }
 
   if (state === "dirty" || state === "missing" || state === "skipped") {

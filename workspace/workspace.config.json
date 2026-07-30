@@ -1,6 +1,33 @@
 {
   "projectsDir": "projects",
-  "defaultGroup": "compliance-testing",
+  "defaultCommand": "start",
+  "defaultConcurrency": 3,
+  "commands": {
+    "clone": {
+      "label": "Clone repositories",
+      "description": "Clone missing project repositories",
+      "concurrency": 3,
+      "order": 10
+    },
+    "install": {
+      "label": "Install dependencies",
+      "description": "Install dependencies for selected projects",
+      "concurrency": 3,
+      "order": 20
+    },
+    "update": {
+      "label": "Update repositories",
+      "description": "Fetch, checkout, and fast-forward selected projects",
+      "concurrency": 3,
+      "order": 30
+    },
+    "start": {
+      "label": "Start dev servers",
+      "description": "Run selected project dev servers",
+      "longRunning": true,
+      "order": 40
+    }
+  },
   "projects": [
     {
       "name": "compliance-base",
@@ -8,8 +35,10 @@
       "path": "compliance-testing/base-app",
       "branch": "main",
       "groups": ["compliance-testing", "all-ui"],
-      "install": "npm install",
-      "start": "npm run start:host"
+      "commands": {
+        "install": "npm install",
+        "start": "npm run start:host"
+      }
     },
     {
       "name": "compliance-mfe-one",
@@ -17,8 +46,10 @@
       "path": "compliance-testing/mfe-one",
       "branch": "main",
       "groups": ["compliance-testing", "all-ui"],
-      "install": "npm install",
-      "start": "npm run start:host"
+      "commands": {
+        "install": "npm install",
+        "start": "npm run start:host"
+      }
     },
     {
       "name": "compliance-mfe-two",
@@ -26,8 +57,10 @@
       "path": "compliance-testing/mfe-two",
       "branch": "main",
       "groups": ["compliance-testing", "all-ui"],
-      "install": "npm install",
-      "start": "npm run start:host"
+      "commands": {
+        "install": "npm install",
+        "start": "npm run start:host"
+      }
     },
     {
       "name": "compliance-mfe-three",
@@ -35,8 +68,10 @@
       "path": "compliance-testing/mfe-three",
       "branch": "main",
       "groups": ["compliance-testing", "all-ui"],
-      "install": "npm install",
-      "start": "npm run start:host"
+      "commands": {
+        "install": "npm install",
+        "start": "npm run start:host"
+      }
     },
     {
       "name": "compliance-mfe-four",
@@ -44,8 +79,10 @@
       "path": "compliance-testing/mfe-four",
       "branch": "main",
       "groups": ["compliance-testing", "all-ui"],
-      "install": "npm install",
-      "start": "npm run start:host"
+      "commands": {
+        "install": "npm install",
+        "start": "npm run start:host"
+      }
     }
   ]
 }
